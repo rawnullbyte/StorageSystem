@@ -29,17 +29,20 @@ fn mime_for(path: &str) -> &str {
 /// fallback (non-file routes like `/containers`, etc.).
 pub async fn serve(path: &str) -> Response<Body> {
     let stripped = path.trim_start_matches('/');
-    let asset = DashboardAssets::get(stripped)
-        .or_else(|| DashboardAssets::get("index.html"));
+    // If the path has no extension or doesn't exist, fall back to index.html
+    let has_ext = stripped.contains('.');
+    let asset_key = if has_ext && DashboardAssets::get(stripped).is_some() {
+        stripped
+    } else {
+        "index.html"
+    };
+    let asset = DashboardAssets::get(asset_key);
 
     match asset {
-        Some(data) => {
-            let mime = mime_for(stripped);
-            Response::builder()
-                .header(header::CONTENT_TYPE, mime)
-                .body(Body::from(data.data.to_vec()))
-                .unwrap()
-        }
+        Some(data) => Response::builder()
+            .header(header::CONTENT_TYPE, mime_for(asset_key))
+            .body(Body::from(data.data.to_vec()))
+            .unwrap(),
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("404"))
