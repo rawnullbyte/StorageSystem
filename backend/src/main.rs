@@ -46,7 +46,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Database connection pool (SQLite file-based)
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite:./inventory.db".into());
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME")
+                .unwrap_or_else(|_| "./".into());
+            let dir = std::path::PathBuf::from(home)
+                .join(".local/share/storagesystem");
+            std::fs::create_dir_all(&dir).expect("Failed to create data directory");
+            format!("sqlite:{}/inventory.db", dir.display())
+        });
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
