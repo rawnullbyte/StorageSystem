@@ -45,6 +45,21 @@ android {
         jvmTarget = "17"
     }
 
+    signingConfigs {
+        create("storagesystemDebug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "storagesystem"
+            keyPassword = "android"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("storagesystemDebug")
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
