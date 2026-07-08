@@ -197,7 +197,7 @@ private fun classifyQr(rawValue: String): QrType {
     val trimmed = rawValue.trim()
     return when {
         trimmed.startsWith("{") && trimmed.contains("\"cid\"") -> QrType.CONTAINER
-        trimmed.startsWith("{") && trimmed.contains("=") -> QrType.LCSC_BAG
+        trimmed.startsWith("{") && (trimmed.contains("=") || trimmed.contains("pbn:") || trimmed.contains(",pc:")) -> QrType.LCSC_BAG
         else -> QrType.UNKNOWN
     }
 }

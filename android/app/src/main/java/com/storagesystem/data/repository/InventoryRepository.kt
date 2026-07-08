@@ -93,12 +93,13 @@ class InventoryRepository {
             }
         }
 
-        // Try LCSC bag QR: key=value pairs (starts with { and contains =)
-        if (trimmed.startsWith("{") && trimmed.contains("=")) {
+        // Try LCSC bag QR: key:value pairs (starts with { and contains pbn:/pc:/on:
+        // LCSC format: {pbn:PICK...,on:GB...,pc:C...,pm:...,qty:...}
+        if (trimmed.startsWith("{") && trimmed.contains("pbn:")) {
             return try {
                 val cleaned = trimmed.removeSurrounding("{", "}")
                 val kvPairs = cleaned.split(",").associate { kv ->
-                    val parts = kv.trim().split("=", limit = 2)
+                    val parts = kv.trim().split(":", limit = 2)
                     parts[0].trim() to parts.getOrElse(1) { "" }.trim()
                 }
                 QrParseResult.LcscBag(
@@ -131,11 +132,11 @@ fun parseQrRaw(rawValue: String): QrParseResult {
             if (data.cid != null) return QrParseResult.Container(cid = data.cid, raw = trimmed)
         } catch (_: Exception) {}
     }
-    if (trimmed.startsWith("{") && trimmed.contains("=")) {
+    if (trimmed.startsWith("{") && trimmed.contains("pbn:")) {
         try {
             val cleaned = trimmed.removeSurrounding("{", "}")
             val kvPairs = cleaned.split(",").associate { kv ->
-                val parts = kv.trim().split("=", limit = 2)
+                val parts = kv.trim().split(":", limit = 2)
                 parts[0].trim() to parts.getOrElse(1) { "" }.trim()
             }
             return QrParseResult.LcscBag(
