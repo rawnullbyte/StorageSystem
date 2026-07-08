@@ -125,14 +125,14 @@ pub async fn update_container(
 // Bags
 // ===========================================================================
 
-/// `GET /api/bags` — list all component bags with joined details.
+/// `GET /api/components` — list all component bags with joined details.
 pub async fn list_bags(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<BagWithDetails>>, (StatusCode, Json<serde_json::Value>)> {
     db::list_bags(&state.db).await.map(Json).map_err(internal_error)
 }
 
-/// `POST /api/bags` — add a new bag (idempotent).
+/// `POST /api/components` — add a new bag (idempotent).
 pub async fn add_bag(
     State(state): State<AppState>,
     Json(payload): Json<AddBagRequest>,
@@ -196,7 +196,7 @@ pub async fn add_bag(
     ))
 }
 
-/// `POST /api/bags/quantity` — manually update bag quantity.
+/// `POST /api/components/quantity` — manually update bag quantity.
 pub async fn update_quantity(
     State(state): State<AppState>,
     Json(payload): Json<UpdateQuantityRequest>,
