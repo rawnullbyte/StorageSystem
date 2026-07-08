@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
 
     // ── UI state ────────────────────────────────────────────────────
     var showContainerSheet by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     // The bag data that the user tapped, awaiting container selection
     var pendingBagData by remember { mutableStateOf<QrParseResult.LcscBag?>(null) }
     // Container registration success tracking
@@ -129,6 +131,13 @@ fun ScannerScreen(viewModel: MainViewModel) {
             TopAppBar(
                 title = { Text("StorageSystem") },
                 actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Icon(
                         imageVector = if (wsConnected.value) Icons.Default.Cloud else Icons.Default.CloudOff,
                         contentDescription = if (wsConnected.value) "Connected" else "Disconnected",
@@ -235,6 +244,11 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 )
             }
         }
+    }
+
+    // ── Settings screen ─────────────────────────────────────────────
+    if (showSettings) {
+        SettingsScreen(onDismiss = { showSettings = false })
     }
 
     // ── Bottom sheet for container selection ────────────────────────

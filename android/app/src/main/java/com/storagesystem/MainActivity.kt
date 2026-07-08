@@ -13,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.storagesystem.data.ServerSettings
 import com.storagesystem.ui.MainViewModel
 import com.storagesystem.ui.ScannerScreen
 
@@ -39,6 +40,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Init runtime server config
+        ServerSettings.init(this)
 
         // Request camera permission
         if (ContextCompat.checkSelfPermission(

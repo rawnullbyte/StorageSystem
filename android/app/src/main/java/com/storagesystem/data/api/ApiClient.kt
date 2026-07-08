@@ -2,7 +2,7 @@ package com.storagesystem.data.api
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.storagesystem.BuildConfig
+import com.storagesystem.data.ServerSettings
 import com.storagesystem.data.models.*
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -29,8 +29,7 @@ object ApiClient {
         }
     }
 
-    private val baseUrl: String get() = BuildConfig.API_BASE_URL
-    val wsUrl: String get() = BuildConfig.WS_URL
+    private val baseUrl: String get() = ServerSettings.apiBaseUrl
 
     // ─── Layers ─────────────────────────────────────────────────────
 

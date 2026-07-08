@@ -3,6 +3,7 @@ package com.storagesystem.data.repository
 import android.util.Log
 import com.storagesystem.data.api.ApiClient
 import com.storagesystem.data.api.WebSocketClient
+import com.storagesystem.data.ServerSettings
 import com.storagesystem.data.models.*
 import com.storagesystem.data.models.Container as ContainerModel
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +24,7 @@ class InventoryRepository {
     val wsEvents: SharedFlow<WsEvent> = wsClient.events
 
     fun connectWebSocket(scope: CoroutineScope) {
-        wsClient.connect(ApiClient.wsUrl, scope)
+        wsClient.connect(ServerSettings.wsUrl, scope)
     }
 
     fun disconnectWebSocket() {
@@ -116,6 +117,38 @@ class InventoryRepository {
 
         return QrParseResult.Unknown(raw = trimmed)
     }
+}
+
+/**
+ * Standalone QR parser for use from UI layer (CameraPreview labels).
+ * Delegates to the same logic as InventoryRepository.
+ */
+fun parseQrRaw(rawValue: String): QrParseResult {
+    val trimmed = rawValue.trim()
+    if (trimmed.startsWith("{") && trimmed.contains("\"cid\"")) {
+        try {
+            val data = com.google.gson.Gson().fromJson(trimmed, ContainerQrData::class.java)
+            if (data.cid != null) return QrParseResult.Container(cid = data.cid, raw = trimmed)
+        } catch (_: Exception) {}
+    }
+    if (trimmed.startsWith("{") && trimmed.contains("=")) {
+        try {
+            val cleaned = trimmed.removeSurrounding("{", "}")
+            val kvPairs = cleaned.split(",").associate { kv ->
+                val parts = kv.trim().split("=", limit = 2)
+                parts[0].trim() to parts.getOrElse(1) { "" }.trim()
+            }
+            return QrParseResult.LcscBag(
+                lcscPartNumber = kvPairs["pc"] ?: "",
+                mfgPartNumber = kvPairs["pm"] ?: "",
+                quantity = kvPairs["qty"]?.toIntOrNull() ?: 0,
+                orderNumber = kvPairs["on"],
+                packageBillNo = kvPairs["pbn"],
+                raw = trimmed
+            )
+        } catch (_: Exception) {}
+    }
+    return QrParseResult.Unknown(raw = trimmed)
 }
 
 /** Result of parsing a QR code string. */
