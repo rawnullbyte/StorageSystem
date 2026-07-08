@@ -172,7 +172,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            // If cid is not a valid UUID, generate one (the backend requires UUID format)
             val containerId = if (result.cid.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")))
                 result.cid
             else
@@ -183,9 +182,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 displayName = displayName,
                 layerId = layerId,
                 containerId = containerId
-            ).onSuccess {
-                Log.i(TAG, "Container $containerId registered to layer $layerId")
-                _toastMessage.emit("Container registered")
+            ).onSuccess { registered ->
+                Log.i(TAG, "Container $containerId registered to layer $layerId: ${registered.display_name}")
+
+                // Immediately insert into local list so the data is available
+                // even before the async loadContainers() call returns
+                val current = _containers.value.toMutableList()
+                current.add(registered)
+                _containers.value = current
+
+                _toastMessage.emit("Container registered: ${registered.display_name}")
+                // Refresh from server in background (overwrites local on completion)
                 loadContainers(layerId)
             }.onFailure { e ->
                 Log.w(TAG, "Container registration failed: ${e.message}")
@@ -212,6 +219,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         containerId: String,
         bagData: QrParseResult.LcscBag
     ) {
+        Log.i(TAG, "assignBag: container=$containerId part=${bagData.lcscPartNumber} qty=${bagData.quantity}")
         viewModelScope.launch {
             val request = AddBagRequest(
                 container_id = containerId,
@@ -223,6 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             repository.assignBag(request).onSuccess { response ->
+                Log.i(TAG, "assignBag result: created=${response.created} qty=${response.current_quantity} msg=${response.message}")
                 if (response.created) {
                     _toastMessage.emit("Bag assigned (qty: ${response.current_quantity})")
                 } else {
@@ -231,6 +240,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }.onFailure { e ->
+                Log.e(TAG, "assignBag failed: ${e.message}")
                 _toastMessage.emit("Failed: ${e.message}")
             }
         }
