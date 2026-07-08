@@ -59,11 +59,39 @@ fun CameraPreview(
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    // pointerInput on the OUTERMOST Box so it captures touches before AndroidView
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .pointerInput(overlayQrs) {
+                detectTapGestures { offset ->
+                    Log.d(TAG, "Tap at (${offset.x}, ${offset.y}), ${latestQrs.size} QRs")
+                    val tapped = latestQrs.minByOrNull { qr ->
+                        val r = qr.boundingBox
+                        val cx = (r.left + r.right) / 2f
+                        val cy = (r.top + r.bottom) / 2f
+                        val dx = offset.x - cx
+                        val dy = offset.y - cy
+                        sqrt(dx * dx + dy * dy)
+                    }
+                    if (tapped != null) {
+                        Log.d(TAG, "→ matched: ${tapped.rawValue.take(40)}")
+                        onTapQr(tapped)
+                    } else {
+                        Log.d(TAG, "→ no match")
+                    }
+                }
+            }
+    ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 val pv = PreviewView(ctx)
+                // Make PreviewView not consume touches so they propagate to the parent Box
+                pv.isClickable = false
+                pv.isFocusable = false
+                pv.isLongClickable = false
+
                 if (!hasCameraPermission) return@AndroidView pv
 
                 val controller = LifecycleCameraController(ctx).apply {
@@ -102,12 +130,10 @@ fun CameraPreview(
                         }
                     }
                 )
-
                 pv
             }
         )
 
-        // Canvas draws overlays (doesn't consume touches)
         Canvas(modifier = Modifier.fillMaxSize()) {
             for ((qr, color) in overlayQrs) {
                 val box = qr.boundingBox
@@ -121,22 +147,14 @@ fun CameraPreview(
                 }
                 val strokeW = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
 
-                drawRect(
-                    color = drawColor,
-                    topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
-                    size = ComposeSize(box.width().toFloat(), box.height().toFloat()),
-                    style = Stroke(width = strokeW)
-                )
-                drawRect(
-                    color = drawColor.copy(alpha = when (color) {
-                        OverlayColor.GREEN_MATCH -> 0.3f
-                        OverlayColor.YELLOW -> 0.25f
-                        OverlayColor.BLUE -> 0.2f
-                        else -> 0.15f
+                drawRect(color = drawColor, topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
+                    size = ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = strokeW))
+                drawRect(color = drawColor.copy(alpha = when (color) {
+                        OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f
+                        OverlayColor.BLUE -> 0.2f; else -> 0.15f
                     }),
                     topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
-                    size = ComposeSize(box.width().toFloat(), box.height().toFloat())
-                )
+                    size = ComposeSize(box.width().toFloat(), box.height().toFloat()))
 
                 val label = buildQuickLabel(qr, color) ?: continue
                 val paint = android.graphics.Paint().apply {
@@ -152,31 +170,6 @@ fun CameraPreview(
             }
             drawAimReticle(size)
         }
-
-        // Tap overlay (on top — only covers canvas, doesn't block camera)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(overlayQrs) {
-                    detectTapGestures { offset ->
-                        Log.d(TAG, "Tap at (${offset.x}, ${offset.y}), ${latestQrs.size} QRs")
-                        val tapped = latestQrs.minByOrNull { qr ->
-                            val r = qr.boundingBox
-                            val cx = (r.left + r.right) / 2f
-                            val cy = (r.top + r.bottom) / 2f
-                            val dx = offset.x - cx
-                            val dy = offset.y - cy
-                            sqrt(dx * dx + dy * dy)
-                        }
-                        if (tapped != null) {
-                            Log.d(TAG, "→ matched: ${tapped.rawValue.take(40)}")
-                            onTapQr(tapped)
-                        } else {
-                            Log.d(TAG, "→ no match")
-                        }
-                    }
-                }
-        )
     }
 }
 
