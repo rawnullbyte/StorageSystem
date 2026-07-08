@@ -21,7 +21,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.storagesystem.data.models.DetectedQr
 import com.storagesystem.data.models.OverlayColor
 import com.storagesystem.ui.camera.QrAnalyzer
@@ -61,11 +61,6 @@ fun CameraPreview(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    // Build the overlay colours map for quick lookup
-    val overlayColorMap = remember(overlayQrs) {
-        overlayQrs.associate { it.first.rawValue to it.second }
-    }
-
     Box(modifier = modifier.fillMaxSize()) {
         // Camera Preview (AndroidView, fills the whole Box)
         AndroidView(
@@ -88,6 +83,7 @@ fun CameraPreview(
                             onQrsDetected(qrs)
                         }
 
+                        @Suppress("DEPRECATION")
                         val imageAnalysis = ImageAnalysis.Builder()
                             .setTargetResolution(Size(IMAGE_WIDTH.toInt(), IMAGE_HEIGHT.toInt()))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)

@@ -126,7 +126,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             // Custom top bar with WS status
-            SmallTopAppBar(
+            TopAppBar(
                 title = { Text("StorageSystem") },
                 actions = {
                     Icon(
@@ -139,7 +139,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
                             MaterialTheme.colorScheme.error
                     )
                 },
-                colors = TopAppBarDefaults.smallTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
