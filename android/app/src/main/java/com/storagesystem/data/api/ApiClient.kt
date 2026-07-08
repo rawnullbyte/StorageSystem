@@ -81,7 +81,7 @@ object ApiClient {
     // ─── Bags ───────────────────────────────────────────────────────
 
     suspend fun addBag(request: AddBagRequest): AddBagResponse {
-        val response = httpClient.post("$baseUrl/api/bags") {
+        val response = httpClient.post("$baseUrl/api/components") {
             contentType(ContentType.Application.Json)
             setBody(request)
         }

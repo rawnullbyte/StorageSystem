@@ -87,7 +87,7 @@ export interface BagWithDetails {
 }
 
 export async function getBags(): Promise<BagWithDetails[]> {
-  return request("/api/bags");
+  return request("/api/components");
 }
 
 export interface AddBagPayload {
@@ -106,7 +106,7 @@ export interface AddBagResponse {
 }
 
 export async function addBag(payload: AddBagPayload): Promise<AddBagResponse> {
-  return request("/api/bags", {
+  return request("/api/components", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -119,7 +119,7 @@ export interface UpdateQuantityPayload {
 }
 
 export async function updateQuantity(payload: UpdateQuantityPayload): Promise<void> {
-  await request("/api/bags/quantity", {
+  await request("/api/components/quantity", {
     method: "POST",
     body: JSON.stringify(payload),
   });

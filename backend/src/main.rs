@@ -11,9 +11,9 @@
 //! | GET    | /api/containers       | List containers          |
 //! | POST   | /api/containers       | Create a container       |
 //! | PATCH  | /api/containers/:id   | Update container         |
-//! | GET    | /api/bags             | List all bags            |
-//! | POST   | /api/bags             | Add a bag (idempotent)   |
-//! | POST   | /api/bags/quantity    | Update bag quantity      |
+//! | GET    | /api/components      | List all bags            |
+//! | POST   | /api/components      | Add a bag (idempotent)   |
+//! | POST   | /api/components/quantity | Update bag quantity   |
 //! | POST   | /api/search           | Search containers/parts  |
 //! | GET    | /ws                   | WebSocket upgrade        |
 
@@ -88,9 +88,9 @@ async fn main() -> anyhow::Result<()> {
         // Containers
         .route("/api/containers", get(handlers::list_containers).post(handlers::create_container))
         .route("/api/containers/{id}", patch(handlers::update_container))
-        // Bags
-        .route("/api/bags", get(handlers::list_bags).post(handlers::add_bag))
-        .route("/api/bags/quantity", post(handlers::update_quantity))
+        // Components (bags)
+        .route("/api/components", get(handlers::list_bags).post(handlers::add_bag))
+        .route("/api/components/quantity", post(handlers::update_quantity))
         // Search
         .route("/api/search", post(handlers::search))
         // WebSocket

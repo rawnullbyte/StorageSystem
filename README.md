@@ -37,9 +37,9 @@ A complete inventory management system for surface-mount components stored in hi
 | GET | `/api/containers` | List containers (filter by `?layer_id=N`) |
 | POST | `/api/containers` | Register a container |
 | PATCH | `/api/containers/:id` | Update container name/layer |
-| GET | `/api/bags` | List all component bags with details |
-| POST | `/api/bags` | Add bag (idempotent — `ON CONFLICT DO NOTHING`) |
-| POST | `/api/bags/quantity` | Manually override quantity |
+| GET | `/api/components` | List all component bags with details |
+| POST | `/api/components` | Add bag (idempotent — `ON CONFLICT DO NOTHING`) |
+| POST | `/api/components/quantity` | Manually override quantity |
 | POST | `/api/search` | Search containers & parts |
 | GET | `/ws` | WebSocket upgrade (broadcast events) |
 

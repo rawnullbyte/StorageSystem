@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Inventory box icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,36h32v4H38zM38,44h32v4H38zM38,52h24v4H38zM34,30h40l4,4v34H30V34z" />
+</vector>
