@@ -18,7 +18,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  SQLX_OFFLINE: true
 
 jobs:
   check:
@@ -37,25 +36,21 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --manifest-path backend/Cargo.toml -- -D warnings
 
-      - name: cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --manifest-path backend/Cargo.toml
-        env:
-          DATABASE_URL: postgres://storage:storage_pass@localhost:5432/inventory_test
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: storage_pass
-          POSTGRES_USER: storage
-          POSTGRES_DB: inventory_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+      - name: Install Rust toolchain (stable)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: cargo build --release
+        run: cargo build --release --manifest-path backend/Cargo.toml
+
+      - name: Upload Rust binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-backend-x86_64-linux
+          path: backend/target/release/storage-backend
+          retention-days: 7

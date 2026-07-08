@@ -55,7 +55,7 @@ pub struct LcscPart {
     pub manufacturer: Option<String>,
     pub package_type: Option<String>,
     pub datasheet_url: Option<String>,
-    pub price_usd_json: Option<serde_json::Value>,
+    pub price_usd_json: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 

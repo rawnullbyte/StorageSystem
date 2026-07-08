@@ -8,14 +8,14 @@ A complete inventory management system for surface-mount components stored in hi
 ┌─────────────────┐      REST + WS      ┌──────────────────┐
 │  Android App     │ ◄─────────────────► │  Rust Backend     │
 │  (Kotlin/Compose)│     (HTTP/WS)       │  (Axum/Tokio)     │
-│  CameraX + ML Kit│                     │  + PostgreSQL     │
+│  CameraX + ML Kit│                     │  + SQLite         │
 └─────────────────┘                      └────────┬─────────┘
                                                   │
                                                   │ SQLx
                                                   ▼
 ┌─────────────────┐                      ┌──────────────────┐
-│  React Dashboard │ ◄─────────────────► │   PostgreSQL      │
-│  (TypeScript)    │     REST + WS       │   (via docker)    │
+│  React Dashboard │ ◄─────────────────► │   SQLite          │
+│  (TypeScript)    │     REST + WS       │   (inventory.db) │
 └─────────────────┘                      └──────────────────┘
 ```
 
@@ -24,7 +24,7 @@ A complete inventory management system for surface-mount components stored in hi
 ### 1. Rust Backend (`./backend/`)
 
 - **Framework:** Axum 0.7 with Tokio runtime
-- **Database:** PostgreSQL via SQLx (async)
+- **Database:** SQLite via SQLx (async, file-based — no server needed)
 - **WebSocket:** `tokio::sync::broadcast` fans out events to all connected clients
 - **LCSC Integration:** SHA-1 signed API client for `ips.lcsc.com` + EasyEDA fallback
 
@@ -70,30 +70,24 @@ A complete inventory management system for surface-mount components stored in hi
 
 ### Prerequisites
 
-- Docker & Docker Compose
 - Rust 1.76+ (for native backend development)
 - Node.js 18+ (for dashboard development)
 - Android Studio (for mobile app)
 
-### 1. Database + Backend (Docker)
-
-```bash
-# Start PostgreSQL and the Rust backend
-docker compose up -d
-
-# The API is now available at http://localhost:8000
-# WebSocket at ws://localhost:8000/ws
-```
-
-### 2. Backend (Native Development)
+### 1. Backend
 
 ```bash
 cd backend
 cp .env.example .env
-
-# Ensure PostgreSQL is running and update DATABASE_URL in .env
+# Edit .env if needed (DATABASE_URL defaults to sqlite:./inventory.db)
 cargo run
+
+# The API is now available at http://localhost:8000
+# WebSocket at ws://localhost:8000/ws
+# The database file (inventory.db) is created automatically in the backend directory
 ```
+
+### 2. Dashboard
 
 ### 3. Dashboard
 
@@ -104,7 +98,7 @@ npm run dev
 # Opens at http://localhost:5173
 ```
 
-### 4. Android App
+### 4. Android App (requires Android Studio or CI)
 
 Open `./android/` in Android Studio. The app connects to `http://10.0.2.2:8000` by default (Android emulator loopback to host).
 
@@ -116,7 +110,7 @@ To change the backend URL, update `API_BASE_URL` and `WS_URL` in `android/app/bu
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgres://storage:storage_pass@localhost:5432/inventory` | PostgreSQL connection string |
+| `DATABASE_URL` | `sqlite:./inventory.db` | SQLite database file path |
 | `HOST` | `0.0.0.0` | Bind address |
 | `PORT` | `8000` | Listen port |
 | `RUST_LOG` | `info` | Log level |
@@ -133,10 +127,10 @@ To change the backend URL, update `API_BASE_URL` and `WS_URL` in `android/app/bu
 ## Database Schema
 
 ```
-storage_layers (id, name, description, created_at)
-containers (id UUID, display_name, storage_layer_id, created_at, updated_at)
-lcsc_parts (lcsc_part_number PK, mfg_part_number, description, ...)
-component_bags (id, container_id, lcsc_part_number, initial_quantity, current_quantity, ...)
+storage_layers (id INTEGER PK, name TEXT, description TEXT, created_at TEXT)
+containers (id TEXT PK UUID, display_name TEXT, storage_layer_id INTEGER, ...)
+lcsc_parts (lcsc_part_number TEXT PK, mfg_part_number TEXT, ..., price_usd_json TEXT)
+component_bags (id INTEGER PK, container_id TEXT, lcsc_part_number TEXT, ...)
     UNIQUE(container_id, lcsc_part_number)
 ```
 

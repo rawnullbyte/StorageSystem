@@ -24,13 +24,13 @@ const BROADCAST_CAPACITY: usize = 256;
 /// Shared application state (cloned into every handler).
 #[derive(Clone)]
 pub struct AppState {
-    pub db: sqlx::PgPool,
+    pub db: sqlx::SqlitePool,
     pub tx: broadcast::Sender<String>,
     pub lcsc_client: Arc<LcscClient>,
 }
 
 impl AppState {
-    pub fn new(db: sqlx::PgPool, lcsc_client: LcscClient) -> Self {
+    pub fn new(db: sqlx::SqlitePool, lcsc_client: LcscClient) -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             db,

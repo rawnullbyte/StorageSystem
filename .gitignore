@@ -29,5 +29,4 @@ backend/.env
 Thumbs.db
 
 # Generated
-*.sqlite
 sqlx-data.json

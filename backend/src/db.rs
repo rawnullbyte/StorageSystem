@@ -1,7 +1,7 @@
-//! Database helper functions wrapping SQLx queries.
+//! Database helper functions wrapping SQLx queries against SQLite.
 
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::models::*;
@@ -10,7 +10,7 @@ use crate::models::*;
 // Storage Layers
 // ---------------------------------------------------------------------------
 
-pub async fn list_layers(pool: &PgPool) -> Result<Vec<StorageLayer>> {
+pub async fn list_layers(pool: &SqlitePool) -> Result<Vec<StorageLayer>> {
     let rows = sqlx::query_as::<_, StorageLayer>(
         "SELECT id, name, description, created_at FROM storage_layers ORDER BY name",
     )
@@ -19,9 +19,9 @@ pub async fn list_layers(pool: &PgPool) -> Result<Vec<StorageLayer>> {
     Ok(rows)
 }
 
-pub async fn create_layer(pool: &PgPool, name: &str, description: Option<&str>) -> Result<StorageLayer> {
+pub async fn create_layer(pool: &SqlitePool, name: &str, description: Option<&str>) -> Result<StorageLayer> {
     let row = sqlx::query_as::<_, StorageLayer>(
-        "INSERT INTO storage_layers (name, description) VALUES ($1, $2)
+        "INSERT INTO storage_layers (name, description) VALUES (?, ?)
          RETURNING id, name, description, created_at",
     )
     .bind(name)
@@ -35,11 +35,11 @@ pub async fn create_layer(pool: &PgPool, name: &str, description: Option<&str>) 
 // Containers
 // ---------------------------------------------------------------------------
 
-pub async fn list_containers(pool: &PgPool, layer_id: Option<i32>) -> Result<Vec<Container>> {
+pub async fn list_containers(pool: &SqlitePool, layer_id: Option<i32>) -> Result<Vec<Container>> {
     let rows = if let Some(lid) = layer_id {
         sqlx::query_as::<_, Container>(
             "SELECT id, display_name, storage_layer_id, created_at, updated_at
-             FROM containers WHERE storage_layer_id = $1 ORDER BY display_name",
+             FROM containers WHERE storage_layer_id = ? ORDER BY display_name",
         )
         .bind(lid)
         .fetch_all(pool)
@@ -55,47 +55,36 @@ pub async fn list_containers(pool: &PgPool, layer_id: Option<i32>) -> Result<Vec
     Ok(rows)
 }
 
+/// Create a container. If `id` is None, a v4 UUID is generated in Rust.
 pub async fn create_container(
-    pool: &PgPool,
+    pool: &SqlitePool,
     display_name: &str,
     storage_layer_id: i32,
     id: Option<Uuid>,
 ) -> Result<Container> {
-    let row = if let Some(uid) = id {
-        sqlx::query_as::<_, Container>(
-            "INSERT INTO containers (id, display_name, storage_layer_id)
-             VALUES ($1, $2, $3)
-             RETURNING id, display_name, storage_layer_id, created_at, updated_at",
-        )
-        .bind(uid)
-        .bind(display_name)
-        .bind(storage_layer_id)
-        .fetch_one(pool)
-        .await?
-    } else {
-        sqlx::query_as::<_, Container>(
-            "INSERT INTO containers (display_name, storage_layer_id)
-             VALUES ($1, $2)
-             RETURNING id, display_name, storage_layer_id, created_at, updated_at",
-        )
-        .bind(display_name)
-        .bind(storage_layer_id)
-        .fetch_one(pool)
-        .await?
-    };
+    let uid = id.unwrap_or_else(Uuid::new_v4);
+    let row = sqlx::query_as::<_, Container>(
+        "INSERT INTO containers (id, display_name, storage_layer_id)
+         VALUES (?, ?, ?)
+         RETURNING id, display_name, storage_layer_id, created_at, updated_at",
+    )
+    .bind(uid)
+    .bind(display_name)
+    .bind(storage_layer_id)
+    .fetch_one(pool)
+    .await?;
     Ok(row)
 }
 
 pub async fn update_container(
-    pool: &PgPool,
+    pool: &SqlitePool,
     id: Uuid,
     display_name: Option<&str>,
     storage_layer_id: Option<i32>,
 ) -> Result<Container> {
-    // Build dynamic UPDATE — for simplicity we fetch then patch.
     let current = sqlx::query_as::<_, Container>(
         "SELECT id, display_name, storage_layer_id, created_at, updated_at
-         FROM containers WHERE id = $1",
+         FROM containers WHERE id = ?",
     )
     .bind(id)
     .fetch_one(pool)
@@ -105,8 +94,8 @@ pub async fn update_container(
     let new_layer = storage_layer_id.unwrap_or(current.storage_layer_id);
 
     let row = sqlx::query_as::<_, Container>(
-        "UPDATE containers SET display_name = $1, storage_layer_id = $2, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $3
+        "UPDATE containers SET display_name = ?, storage_layer_id = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+         WHERE id = ?
          RETURNING id, display_name, storage_layer_id, created_at, updated_at",
     )
     .bind(new_name)
@@ -117,10 +106,10 @@ pub async fn update_container(
     Ok(row)
 }
 
-pub async fn get_container(pool: &PgPool, id: Uuid) -> Result<Option<Container>> {
+pub async fn get_container(pool: &SqlitePool, id: Uuid) -> Result<Option<Container>> {
     let row = sqlx::query_as::<_, Container>(
         "SELECT id, display_name, storage_layer_id, created_at, updated_at
-         FROM containers WHERE id = $1",
+         FROM containers WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -133,7 +122,7 @@ pub async fn get_container(pool: &PgPool, id: Uuid) -> Result<Option<Container>>
 // ---------------------------------------------------------------------------
 
 pub async fn upsert_part(
-    pool: &PgPool,
+    pool: &SqlitePool,
     lcsc_part_number: &str,
     mfg_part_number: &str,
     description: Option<&str>,
@@ -143,13 +132,13 @@ pub async fn upsert_part(
 ) -> Result<LcscPart> {
     let row = sqlx::query_as::<_, LcscPart>(
         "INSERT INTO lcsc_parts (lcsc_part_number, mfg_part_number, description, manufacturer, package_type, datasheet_url)
-         VALUES ($1, $2, $3, $4, $5, $6)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (lcsc_part_number) DO UPDATE SET
-            mfg_part_number = EXCLUDED.mfg_part_number,
-            description = COALESCE(EXCLUDED.description, lcsc_parts.description),
-            manufacturer = COALESCE(EXCLUDED.manufacturer, lcsc_parts.manufacturer),
-            package_type = COALESCE(EXCLUDED.package_type, lcsc_parts.package_type),
-            datasheet_url = COALESCE(EXCLUDED.datasheet_url, lcsc_parts.datasheet_url)
+            mfg_part_number = excluded.mfg_part_number,
+            description = COALESCE(excluded.description, lcsc_parts.description),
+            manufacturer = COALESCE(excluded.manufacturer, lcsc_parts.manufacturer),
+            package_type = COALESCE(excluded.package_type, lcsc_parts.package_type),
+            datasheet_url = COALESCE(excluded.datasheet_url, lcsc_parts.datasheet_url)
          RETURNING lcsc_part_number, mfg_part_number, description, manufacturer,
                    package_type, datasheet_url, price_usd_json, created_at",
     )
@@ -171,22 +160,22 @@ pub async fn upsert_part(
 /// Insert a bag or — if one already exists for (container_id, lcsc_part_number) —
 /// do nothing and return the existing current_quantity.
 pub async fn add_bag(
-    pool: &PgPool,
+    pool: &SqlitePool,
     container_id: Uuid,
     lcsc_part_number: &str,
     quantity: i32,
     order_number: Option<&str>,
     package_bill_no: Option<&str>,
 ) -> Result<(bool, i32)> {
-    // Attempt insert; ON CONFLICT DO NOTHING.
     let result = sqlx::query_scalar::<_, Option<i32>>(
         "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no)
-         VALUES ($1, $2, $3, $3, $4, $5)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (container_id, lcsc_part_number) DO NOTHING
          RETURNING current_quantity",
     )
     .bind(container_id)
     .bind(lcsc_part_number)
+    .bind(quantity)
     .bind(quantity)
     .bind(order_number)
     .bind(package_bill_no)
@@ -194,12 +183,11 @@ pub async fn add_bag(
     .await?;
 
     match result {
-        Some(Some(qty)) => Ok((true, qty)), // fresh insert
+        Some(Some(qty)) => Ok((true, qty)),
         _ => {
-            // Already exists — fetch existing quantity
             let existing = sqlx::query_scalar::<_, i32>(
                 "SELECT current_quantity FROM component_bags
-                 WHERE container_id = $1 AND lcsc_part_number = $2",
+                 WHERE container_id = ? AND lcsc_part_number = ?",
             )
             .bind(container_id)
             .bind(lcsc_part_number)
@@ -211,14 +199,14 @@ pub async fn add_bag(
 }
 
 pub async fn update_quantity(
-    pool: &PgPool,
+    pool: &SqlitePool,
     container_id: Uuid,
     lcsc_part_number: &str,
     new_quantity: i32,
 ) -> Result<i32> {
     let qty = sqlx::query_scalar::<_, i32>(
-        "UPDATE component_bags SET current_quantity = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE container_id = $2 AND lcsc_part_number = $3
+        "UPDATE component_bags SET current_quantity = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+         WHERE container_id = ? AND lcsc_part_number = ?
          RETURNING current_quantity",
     )
     .bind(new_quantity)
@@ -230,7 +218,7 @@ pub async fn update_quantity(
 }
 
 /// List all bags with joined container/layer/part information.
-pub async fn list_bags(pool: &PgPool) -> Result<Vec<BagWithDetails>> {
+pub async fn list_bags(pool: &SqlitePool) -> Result<Vec<BagWithDetails>> {
     let rows = sqlx::query_as::<_, BagWithDetails>(
         r#"
         SELECT
@@ -267,14 +255,16 @@ pub async fn list_bags(pool: &PgPool) -> Result<Vec<BagWithDetails>> {
 // Search
 // ---------------------------------------------------------------------------
 
-pub async fn search(pool: &PgPool, term: &str) -> Result<SearchResult> {
+pub async fn search(pool: &SqlitePool, term: &str) -> Result<SearchResult> {
     let pattern = format!("%{}%", term);
 
-    // Search containers by display_name or UUID (partial string match)
+    // Search containers by display_name or UUID (partial string match).
+    // SQLite LIKE is case-insensitive for ASCII characters.
     let containers = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM containers
-         WHERE display_name ILIKE $1 OR id::text ILIKE $1",
+         WHERE display_name LIKE ? OR id LIKE ?",
     )
+    .bind(&pattern)
     .bind(&pattern)
     .fetch_all(pool)
     .await?;
@@ -282,7 +272,7 @@ pub async fn search(pool: &PgPool, term: &str) -> Result<SearchResult> {
     // Search LCSC part numbers
     let parts = sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT lcsc_part_number FROM component_bags
-         WHERE lcsc_part_number ILIKE $1",
+         WHERE lcsc_part_number LIKE ?",
     )
     .bind(&pattern)
     .fetch_all(pool)

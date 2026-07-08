@@ -1,6 +1,6 @@
 //! StorageSystem — High-Density Inventory Tracking Backend
 //!
-//! Axum-based REST + WebSocket server with PostgreSQL persistence.
+//! Axum-based REST + WebSocket server with SQLite persistence.
 //!
 //! # Endpoints
 //!
@@ -27,7 +27,7 @@ use std::net::SocketAddr;
 
 use axum::routing::{get, patch, post};
 use axum::Router;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::SqlitePoolOptions;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
@@ -44,23 +44,34 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // Database connection pool
+    // Database connection pool (SQLite file-based)
     let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+        .unwrap_or_else(|_| "sqlite:./inventory.db".into());
 
-    let pool = PgPoolOptions::new()
-        .max_connections(20)
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
         .connect(&database_url)
         .await
-        .expect("Failed to connect to PostgreSQL");
+        .expect("Failed to connect to SQLite");
 
-    info!("Connected to database");
+    info!("Connected to database: {database_url}");
 
-    // Run migrations (apply SQL file — raw_sql supports multiple statements)
+    // SQLite performance and correctness PRAGMAs
+    sqlx::raw_sql("PRAGMA journal_mode=WAL")
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql("PRAGMA busy_timeout=5000")
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql("PRAGMA foreign_keys=ON")
+        .execute(&pool)
+        .await?;
+
+    // Run migrations (apply SQL file)
     sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql"))
         .execute(&pool)
         .await?;
-    info!("Database migrations applied");
+    info!("Database schema up to date");
 
     // LCSC client (optional credentials)
     let lcsc_key = std::env::var("LCSC_API_KEY").ok();
