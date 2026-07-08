@@ -60,6 +60,7 @@ fun CameraPreview(
                 val controller = LifecycleCameraController(ctx)
                 controller.cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                 controller.bindToLifecycle(lifecycleOwner)
+                pv.controller = controller
 
                 val scanner = BarcodeScanning.getClient(
                     com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
