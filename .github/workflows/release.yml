@@ -88,6 +88,19 @@ jobs:
         with:
           workspaces: backend
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Build dashboard (for embedding in binary)
+        run: |
+          npm ci
+          npm run build
+        working-directory: dashboard
+
       - name: cargo build --release
         run: cargo build --release --manifest-path backend/Cargo.toml
 

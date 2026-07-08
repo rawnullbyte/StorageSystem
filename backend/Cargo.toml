@@ -30,3 +30,5 @@ rand = "0.8"
 anyhow = "1"
 futures = "0.3"
 tower = { version = "0.4", features = ["util"] }
+rust-embed = "8"
+mime_guess = "2"
