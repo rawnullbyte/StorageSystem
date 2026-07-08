@@ -151,3 +151,4 @@ The `component_bags` table has a unique constraint on `(container_id, lcsc_part_
 3. **Idempotency:** Scan the same bag again → no duplicate, existing quantity returned
 4. **Stock adjustment:** Change quantity in dashboard → updates via WebSocket
 5. **Search:** Search for a part number that exists in 2+ containers → both highlighted green
+
