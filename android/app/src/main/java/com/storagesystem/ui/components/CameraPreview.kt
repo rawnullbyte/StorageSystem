@@ -4,13 +4,14 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.util.Log
+import android.view.MotionEvent
+import android.view.View
 import androidx.camera.core.CameraSelector
 import androidx.camera.mlkit.vision.MlKitAnalyzer
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -21,10 +22,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -59,39 +58,11 @@ fun CameraPreview(
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
-    // pointerInput on the OUTERMOST Box so it captures touches before AndroidView
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(overlayQrs) {
-                detectTapGestures { offset ->
-                    Log.d(TAG, "Tap at (${offset.x}, ${offset.y}), ${latestQrs.size} QRs")
-                    val tapped = latestQrs.minByOrNull { qr ->
-                        val r = qr.boundingBox
-                        val cx = (r.left + r.right) / 2f
-                        val cy = (r.top + r.bottom) / 2f
-                        val dx = offset.x - cx
-                        val dy = offset.y - cy
-                        sqrt(dx * dx + dy * dy)
-                    }
-                    if (tapped != null) {
-                        Log.d(TAG, "→ matched: ${tapped.rawValue.take(40)}")
-                        onTapQr(tapped)
-                    } else {
-                        Log.d(TAG, "→ no match")
-                    }
-                }
-            }
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 val pv = PreviewView(ctx)
-                // Make PreviewView not consume touches so they propagate to the parent Box
-                pv.isClickable = false
-                pv.isFocusable = false
-                pv.isLongClickable = false
-
                 if (!hasCameraPermission) return@AndroidView pv
 
                 val controller = LifecycleCameraController(ctx).apply {
@@ -125,11 +96,35 @@ fun CameraPreview(
                         latestQrs.clear()
                         latestQrs.addAll(detected)
                         onQrsDetected(detected)
-                        if (detected.isNotEmpty()) {
-                            Log.d(TAG, "Detected ${detected.size} QR(s): ${detected.first().rawValue.take(40)}")
-                        }
                     }
                 )
+
+                // Direct touch listener — bypasses Compose gesture routing entirely.
+                // This is the only reliable way to capture taps on top of PreviewView.
+                pv.setOnTouchListener { _: View, event: MotionEvent ->
+                    if (event.action == MotionEvent.ACTION_UP) {
+                        val tx = event.x
+                        val ty = event.y
+                        Log.d(TAG, "Touch at ($tx, $ty), ${latestQrs.size} QRs")
+                        val tapped = latestQrs.minByOrNull { qr ->
+                            val r = qr.boundingBox
+                            val cx = (r.left + r.right) / 2f
+                            val cy = (r.top + r.bottom) / 2f
+                            val dx = tx - cx
+                            val dy = ty - cy
+                            sqrt(dx * dx + dy * dy)
+                        }
+                        if (tapped != null) {
+                            Log.d(TAG, "→ matched: ${tapped.rawValue.take(40)}")
+                            onTapQr(tapped)
+                        } else {
+                            Log.d(TAG, "→ no match (closest dist)")
+                        }
+                    }
+                    // Return false so Compose can still process if needed
+                    false
+                }
+
                 pv
             }
         )
@@ -146,7 +141,6 @@ fun CameraPreview(
                     OverlayColor.RED_NON_MATCH -> Color.Red
                 }
                 val strokeW = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
-
                 drawRect(color = drawColor, topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
                     size = ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = strokeW))
                 drawRect(color = drawColor.copy(alpha = when (color) {
