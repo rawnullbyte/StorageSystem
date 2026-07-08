@@ -25,11 +25,16 @@ mod websocket;
 
 use std::net::SocketAddr;
 
+use axum::body::Body;
+use axum::http::{Response, StatusCode};
 use axum::routing::{get, patch, post};
 use axum::Router;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
+use std::sync::Arc;
+use tower::service_fn;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 use tracing::info;
 
 use crate::lcsc_client::LcscClient;
@@ -99,23 +104,53 @@ async fn main() -> anyhow::Result<()> {
     // Shared state
     let state = AppState::new(pool, lcsc_client);
 
+    // Determine dashboard dist path (relative to backend binary / CWD)
+    let dist_path = std::env::var("DASHBOARD_DIST")
+        .unwrap_or_else(|_| "../dashboard/dist".into());
+
+    // Read index.html once at startup for SPA fallback
+    let index_path = format!("{}/index.html", dist_path);
+    let index_html = std::sync::Arc::new(
+        std::fs::read_to_string(&index_path)
+            .unwrap_or_else(|_| {
+                tracing::warn!("Dashboard dist not found at {index_path} — build it with: cd dashboard && npm run build");
+                String::new()
+            })
+    );
+
     // Router
     let app = Router::new()
-        // Layers
+        // API routes
         .route("/api/layers", get(handlers::list_layers).post(handlers::create_layer))
-        // Containers
         .route("/api/containers", get(handlers::list_containers).post(handlers::create_container))
         .route("/api/containers/{id}", patch(handlers::update_container))
-        // Components (bags)
         .route("/api/components", get(handlers::list_bags).post(handlers::add_bag))
         .route("/api/components/quantity", post(handlers::update_quantity))
-        // Search
         .route("/api/search", post(handlers::search))
-        // WebSocket
         .route("/ws", get(ws_handler))
-        // CORS — allow all origins for development
+        // CORS for API
         .layer(CorsLayer::permissive())
-        .with_state(state);
+        .with_state(state.clone())
+        // Dashboard static files
+        .fallback_service(
+            ServeDir::new(&dist_path)
+                .not_found_service(service_fn(move |_req: axum::http::Request<Body>| {
+                    let html = index_html.clone();
+                    async move {
+                        if html.is_empty() {
+                            Ok(Response::builder()
+                                .status(StatusCode::NOT_FOUND)
+                                .body(Body::from("Dashboard not built — run: cd dashboard && npm run build"))
+                                .unwrap())
+                        } else {
+                            Ok(Response::builder()
+                                .header("content-type", "text/html")
+                                .body(Body::from(html.as_ref().clone()))
+                                .unwrap())
+                        }
+                    }
+                }))
+        );
 
     // Bind
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
