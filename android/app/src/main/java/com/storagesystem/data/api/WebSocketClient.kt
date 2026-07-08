@@ -85,7 +85,7 @@ class WebSocketClient {
             }
 
             if (event != null) {
-                _events.tryEmit(event)
+                _events.tryEmit(event!!)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse WS message: ${e.message}")

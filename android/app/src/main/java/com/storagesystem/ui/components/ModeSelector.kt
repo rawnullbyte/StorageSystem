@@ -28,6 +28,7 @@ private val modeOptions = listOf(
     ModeOption(ScanMode.SEARCH, "Search", Icons.Default.Search)
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModeSelector(
     currentMode: ScanMode,
