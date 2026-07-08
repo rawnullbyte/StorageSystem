@@ -1,0 +1,33 @@
+# Rust
+backend/target/
+
+# Node
+dashboard/node_modules/
+dashboard/dist/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.externalNativeBuild/
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Environment
+.env
+backend/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+*.sqlite
+sqlx-data.json

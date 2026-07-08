@@ -1,0 +1,243 @@
+package com.storagesystem.ui
+
+import android.app.Application
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.storagesystem.data.models.*
+import com.storagesystem.data.repository.InventoryRepository
+import com.storagesystem.data.repository.QrParseResult
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+
+/**
+ * ViewModel managing the UI state for the camera + scanning modes.
+ *
+ * Maintains:
+ * - Current [ScanMode]
+ * - List of layers & containers (loaded from backend)
+ * - Selected layer for auto-import / bag assignment
+ * - Detected QR codes from the latest camera frame
+ * - Search state
+ * - Toast/error messages
+ */
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "MainViewModel"
+    }
+
+    private val repository = InventoryRepository()
+
+    /** Expose the repository's QR parser so UI can access it. */
+    fun parseQrCode(rawValue: String): QrParseResult = repository.parseQrCode(rawValue)
+
+    // ─── Mode ───────────────────────────────────────────────────────
+
+    private val _scanMode = MutableStateFlow(ScanMode.AUTO_IMPORT_CONTAINERS)
+    val scanMode: StateFlow<ScanMode> = _scanMode.asStateFlow()
+
+    fun setScanMode(mode: ScanMode) {
+        _scanMode.value = mode
+        if (mode != ScanMode.SEARCH) {
+            _searchTerm.value = ""
+            _searchResult.value = null
+        }
+    }
+
+    // ─── Layers ─────────────────────────────────────────────────────
+
+    private val _layers = MutableStateFlow<List<StorageLayer>>(emptyList())
+    val layers: StateFlow<List<StorageLayer>> = _layers.asStateFlow()
+
+    private val _selectedLayerId = MutableStateFlow<Int?>(null)
+    val selectedLayerId: StateFlow<Int?> = _selectedLayerId.asStateFlow()
+
+    fun setSelectedLayerId(id: Int?) {
+        _selectedLayerId.value = id
+    }
+
+    // ─── Containers for selected layer ──────────────────────────────
+
+    private val _containers = MutableStateFlow<List<Container>>(emptyList())
+    val containers: StateFlow<List<Container>> = _containers.asStateFlow()
+
+    // ─── Detected QR codes (updated per frame) ─────────────────────
+
+    private val _detectedQrs = MutableStateFlow<List<DetectedQr>>(emptyList())
+    val detectedQrs: StateFlow<List<DetectedQr>> = _detectedQrs.asStateFlow()
+
+    fun updateDetectedQrs(qrs: List<DetectedQr>) {
+        _detectedQrs.value = qrs
+    }
+
+    // ─── Toast messages ─────────────────────────────────────────────
+
+    private val _toastMessage = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val toastMessage: SharedFlow<String> = _toastMessage.asSharedFlow()
+
+    // ─── Search state ───────────────────────────────────────────────
+
+    private val _searchTerm = MutableStateFlow("")
+    val searchTerm: StateFlow<String> = _searchTerm.asStateFlow()
+
+    private val _searchResult = MutableStateFlow<SearchResult?>(null)
+    val searchResult: StateFlow<SearchResult?> = _searchResult.asStateFlow()
+
+    fun updateSearchTerm(term: String) {
+        _searchTerm.value = term
+    }
+
+    // ─── WebSocket ─────────────────────────────────────────────────
+
+    private val _wsEvent = MutableSharedFlow<WsEvent>(extraBufferCapacity = 8)
+    val wsEvent: SharedFlow<WsEvent> = _wsEvent.asSharedFlow()
+
+    // ─── Initialisation ─────────────────────────────────────────────
+
+    init {
+        loadLayers()
+        repository.connectWebSocket(viewModelScope)
+
+        // Forward WS events
+        viewModelScope.launch {
+            repository.wsEvents.collect { event ->
+                _wsEvent.emit(event)
+                when (event) {
+                    is WsEvent.BagAdded -> {
+                        _toastMessage.emit("Bag ${event.lcsc_part_number} added to container")
+                    }
+                    is WsEvent.QuantityUpdated -> {
+                        _toastMessage.emit("Quantity updated: ${event.lcsc_part_number} → ${event.new_quantity}")
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        repository.disconnectWebSocket()
+    }
+
+    fun loadLayers() {
+        viewModelScope.launch {
+            repository.getLayers().onSuccess { layerList ->
+                _layers.value = layerList
+                if (_selectedLayerId.value == null && layerList.isNotEmpty()) {
+                    _selectedLayerId.value = layerList.first().id
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to load layers", e)
+                _toastMessage.emit("Failed to load layers: ${e.message}")
+            }
+        }
+    }
+
+    fun loadContainers(layerId: Int?) {
+        viewModelScope.launch {
+            repository.getContainers(layerId).onSuccess { containerList ->
+                _containers.value = containerList
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to load containers", e)
+            }
+        }
+    }
+
+    // ─── Actions triggered by scan results ──────────────────────────
+
+    /**
+     * Handle a parsed QR code based on the current [ScanMode].
+     */
+    fun handleQrScan(parseResult: QrParseResult) {
+        when (parseResult) {
+            is QrParseResult.Container -> handleContainerScan(parseResult)
+            is QrParseResult.LcscBag -> handleBagScan(parseResult)
+            is QrParseResult.Unknown -> {
+                viewModelScope.launch { _toastMessage.emit("Unknown QR code format") }
+            }
+        }
+    }
+
+    private fun handleContainerScan(result: QrParseResult.Container) {
+        val layerId = _selectedLayerId.value
+        if (layerId == null) {
+            viewModelScope.launch { _toastMessage.emit("Select a layer first") }
+            return
+        }
+
+        viewModelScope.launch {
+            // Use cid as both display name (truncated) and UUID
+            val displayName = result.cid.take(8)
+            repository.registerContainer(
+                displayName = displayName,
+                layerId = layerId,
+                containerId = result.cid
+            ).onSuccess {
+                Log.i(TAG, "Container ${result.cid} registered to layer $layerId")
+                _toastMessage.emit("Container registered")
+                loadContainers(layerId)
+            }.onFailure { e ->
+                Log.w(TAG, "Container registration failed: ${e.message}")
+                _toastMessage.emit("Registration failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun handleBagScan(result: QrParseResult.LcscBag) {
+        if (result.lcscPartNumber.isEmpty()) {
+            viewModelScope.launch { _toastMessage.emit("Invalid bag QR: no part number") }
+            return
+        }
+        // Assignment is handled via the bottom sheet UI (user selects container).
+        // Here we just log and let the UI layer call assignBagToContainer.
+        Log.i(TAG, "Bag detected: ${result.lcscPartNumber}, qty=${result.quantity}")
+    }
+
+    /**
+     * Assign a previously scanned bag to a chosen container.
+     * Called from the bottom sheet after user picks a container.
+     */
+    fun assignBagToContainer(
+        containerId: String,
+        bagData: QrParseResult.LcscBag
+    ) {
+        viewModelScope.launch {
+            val request = AddBagRequest(
+                container_id = containerId,
+                lcsc_part_number = bagData.lcscPartNumber,
+                mfg_part_number = bagData.mfgPartNumber,
+                quantity = bagData.quantity,
+                order_number = bagData.orderNumber,
+                package_bill_no = bagData.packageBillNo
+            )
+
+            repository.assignBag(request).onSuccess { response ->
+                if (response.created) {
+                    _toastMessage.emit("Bag assigned (qty: ${response.current_quantity})")
+                } else {
+                    _toastMessage.emit(
+                        "Already registered — existing qty: ${response.current_quantity}"
+                    )
+                }
+            }.onFailure { e ->
+                _toastMessage.emit("Failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Perform a search via the backend.
+     */
+    fun executeSearch(term: String) {
+        if (term.isBlank()) return
+        viewModelScope.launch {
+            repository.search(term).onSuccess { result ->
+                _searchResult.value = result
+            }.onFailure { e ->
+                _toastMessage.emit("Search failed: ${e.message}")
+            }
+        }
+    }
+}
