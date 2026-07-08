@@ -66,7 +66,7 @@ class WebSocketClient {
             val type = json.get("type")?.asString ?: return
             val payload = json.getAsJsonObject("payload") ?: return
 
-            val event: WsEvent = when (type) {
+            val event: WsEvent? = when (type) {
                 "BagAdded" -> WsEvent.BagAdded(
                     container_id = payload.get("container_id").asString,
                     lcsc_part_number = payload.get("lcsc_part_number").asString,
