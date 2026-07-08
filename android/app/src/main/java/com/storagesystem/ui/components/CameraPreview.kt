@@ -3,6 +3,7 @@ package com.storagesystem.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.mlkit.vision.MlKitAnalyzer
 import androidx.camera.view.CameraController
@@ -23,6 +24,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -35,6 +37,8 @@ import com.storagesystem.data.repository.parseQrRaw
 import com.storagesystem.data.repository.QrParseResult
 import kotlin.math.sqrt
 
+private const val TAG = "CameraPreview"
+
 @Composable
 fun CameraPreview(
     overlayQrs: List<Pair<DetectedQr, OverlayColor>>,
@@ -45,6 +49,11 @@ fun CameraPreview(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestQrs = remember { mutableStateListOf<DetectedQr>() }
+
+    LaunchedEffect(overlayQrs) {
+        latestQrs.clear()
+        latestQrs.addAll(overlayQrs.map { it.first })
+    }
 
     val hasCameraPermission = remember {
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -57,9 +66,10 @@ fun CameraPreview(
                 val pv = PreviewView(ctx)
                 if (!hasCameraPermission) return@AndroidView pv
 
-                val controller = LifecycleCameraController(ctx)
-                controller.cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                controller.bindToLifecycle(lifecycleOwner)
+                val controller = LifecycleCameraController(ctx).apply {
+                    cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                    bindToLifecycle(lifecycleOwner)
+                }
                 pv.controller = controller
 
                 val scanner = BarcodeScanning.getClient(
@@ -75,8 +85,8 @@ fun CameraPreview(
                         CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED,
                         ContextCompat.getMainExecutor(ctx)
                     ) { result: MlKitAnalyzer.Result? ->
-                        val barcodes = result?.getValue(scanner) ?: emptyList<Barcode>()
-                        val detected = barcodes.mapNotNull { barcode ->
+                        val barcodes: List<Barcode>? = result?.getValue(scanner) as? List<Barcode>
+                        val detected = (barcodes ?: emptyList()).mapNotNull { barcode ->
                             val raw = barcode.rawValue ?: return@mapNotNull null
                             DetectedQr(
                                 rawValue = raw,
@@ -87,6 +97,9 @@ fun CameraPreview(
                         latestQrs.clear()
                         latestQrs.addAll(detected)
                         onQrsDetected(detected)
+                        if (detected.isNotEmpty()) {
+                            Log.d(TAG, "Detected ${detected.size} QR(s): ${detected.first().rawValue.take(40)}")
+                        }
                     }
                 )
 
@@ -94,7 +107,7 @@ fun CameraPreview(
             }
         )
 
-        // Overlay — draws from the prop overlayQrs
+        // Canvas draws overlays (doesn't consume touches)
         Canvas(modifier = Modifier.fillMaxSize()) {
             for ((qr, color) in overlayQrs) {
                 val box = qr.boundingBox
@@ -125,43 +138,42 @@ fun CameraPreview(
                     size = ComposeSize(box.width().toFloat(), box.height().toFloat())
                 )
 
-                val label = buildQuickLabel(qr, color)
-                if (label != null) {
-                    val paint = android.graphics.Paint().apply {
-                        this.color = drawColor.toArgb()
-                        textSize = 36f
-                        isAntiAlias = true
-                        typeface = android.graphics.Typeface.MONOSPACE
-                        isFakeBoldText = true
-                    }
-                    val bg = android.graphics.Paint().apply {
-                        this.color = android.graphics.Color.argb(200, 0, 0, 0)
-                    }
-                    val tw = paint.measureText(label)
-                    val lx = (box.left + box.right - tw.toInt()) / 2f
-                    val ly = (box.top - 12f).coerceAtLeast(4f)
-                    drawContext.canvas.nativeCanvas.drawRoundRect(
-                        lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg
-                    )
-                    drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
+                val label = buildQuickLabel(qr, color) ?: continue
+                val paint = android.graphics.Paint().apply {
+                    this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
+                    typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true
                 }
+                val bg = android.graphics.Paint().apply { this.color = android.graphics.Color.argb(200, 0, 0, 0) }
+                val tw = paint.measureText(label)
+                val lx = (box.left + box.right - tw.toInt()) / 2f
+                val ly = (box.top - 12f).coerceAtLeast(4f)
+                drawContext.canvas.nativeCanvas.drawRoundRect(lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg)
+                drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
             }
             drawAimReticle(size)
         }
 
-        // Tap overlay
+        // Tap overlay (on top — only covers canvas, doesn't block camera)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(overlayQrs) {
                     detectTapGestures { offset ->
+                        Log.d(TAG, "Tap at (${offset.x}, ${offset.y}), ${latestQrs.size} QRs")
                         val tapped = latestQrs.minByOrNull { qr ->
                             val r = qr.boundingBox
                             val cx = (r.left + r.right) / 2f
                             val cy = (r.top + r.bottom) / 2f
-                            (offset.x - cx) * (offset.x - cx) + (offset.y - cy) * (offset.y - cy)
+                            val dx = offset.x - cx
+                            val dy = offset.y - cy
+                            sqrt(dx * dx + dy * dy)
                         }
-                        if (tapped != null) onTapQr(tapped)
+                        if (tapped != null) {
+                            Log.d(TAG, "→ matched: ${tapped.rawValue.take(40)}")
+                            onTapQr(tapped)
+                        } else {
+                            Log.d(TAG, "→ no match")
+                        }
                     }
                 }
         )
