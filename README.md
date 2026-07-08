@@ -89,8 +89,6 @@ cargo run
 
 ### 2. Dashboard
 
-### 3. Dashboard
-
 ```bash
 cd dashboard
 npm install
@@ -98,11 +96,11 @@ npm run dev
 # Opens at http://localhost:5173
 ```
 
-### 4. Android App (requires Android Studio or CI)
+### 3. Android App (requires Android Studio or CI)
 
 Open `./android/` in Android Studio. The app connects to `http://10.0.2.2:8000` by default (Android emulator loopback to host).
 
-To change the backend URL, update `API_BASE_URL` and `WS_URL` in `android/app/build.gradle.kts`.
+To change the backend URL, update `API_BASE_URL` and `WS_URL` in `android/app/build.gradle.kts` — or use the in-app Settings screen after installing.
 
 ## Environment Variables
 
@@ -151,4 +149,3 @@ The `component_bags` table has a unique constraint on `(container_id, lcsc_part_
 3. **Idempotency:** Scan the same bag again → no duplicate, existing quantity returned
 4. **Stock adjustment:** Change quantity in dashboard → updates via WebSocket
 5. **Search:** Search for a part number that exists in 2+ containers → both highlighted green
-
