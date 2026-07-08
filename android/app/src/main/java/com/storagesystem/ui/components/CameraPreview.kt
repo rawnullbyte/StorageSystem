@@ -3,13 +3,10 @@ package com.storagesystem.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
-import android.util.Size
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.mlkit.vision.MlKitAnalyzer
-import androidx.camera.view.CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED
+import androidx.camera.view.CameraController
+import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -36,16 +33,8 @@ import com.storagesystem.data.models.OverlayColor
 import com.storagesystem.data.models.QrType
 import com.storagesystem.data.repository.parseQrRaw
 import com.storagesystem.data.repository.QrParseResult
-import java.util.concurrent.Executors
 import kotlin.math.sqrt
 
-/**
- * Camera preview with AR-style QR overlay.
- *
- * Uses ProcessCameraProvider + ImageAnalysis + MlKitAnalyzer with
- * COORDINATE_SYSTEM_VIEW_REFERENCED so bounding boxes come in
- * PreviewView pixel coordinates — no manual transformation needed.
- */
 @Composable
 fun CameraPreview(
     overlayQrs: List<Pair<DetectedQr, OverlayColor>>,
@@ -66,8 +55,11 @@ fun CameraPreview(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 val pv = PreviewView(ctx)
-
                 if (!hasCameraPermission) return@AndroidView pv
+
+                val controller = LifecycleCameraController(ctx)
+                controller.cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                controller.bindToLifecycle(lifecycleOwner)
 
                 val scanner = BarcodeScanning.getClient(
                     com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
@@ -75,52 +67,38 @@ fun CameraPreview(
                         .build()
                 )
 
-                val analyzer = MlKitAnalyzer(
-                    listOf(scanner),
-                    COORDINATE_SYSTEM_VIEW_REFERENCED,
-                    ContextCompat.getMainExecutor(ctx)
-                ) { result: MlKitAnalyzer.Result? ->
-                    val barcodes = result?.getValue(scanner) ?: emptyList<Barcode>()
-                    val detected = barcodes.mapNotNull { barcode ->
-                        val raw = barcode.rawValue ?: return@mapNotNull null
-                        DetectedQr(
-                            rawValue = raw,
-                            boundingBox = barcode.boundingBox ?: Rect(0, 0, 0, 0),
-                            qrType = classifyQr(raw)
-                        )
+                controller.setImageAnalysisAnalyzer(
+                    ContextCompat.getMainExecutor(ctx),
+                    MlKitAnalyzer(
+                        listOf(scanner),
+                        CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED,
+                        ContextCompat.getMainExecutor(ctx)
+                    ) { result: MlKitAnalyzer.Result? ->
+                        val barcodes = result?.getValue(scanner) ?: emptyList<Barcode>()
+                        val detected = barcodes.mapNotNull { barcode ->
+                            val raw = barcode.rawValue ?: return@mapNotNull null
+                            DetectedQr(
+                                rawValue = raw,
+                                boundingBox = barcode.boundingBox ?: Rect(0, 0, 0, 0),
+                                qrType = classifyQr(raw)
+                            )
+                        }
+                        latestQrs.clear()
+                        latestQrs.addAll(detected)
+                        onQrsDetected(detected)
                     }
-                    latestQrs.clear()
-                    latestQrs.addAll(detected)
-                    onQrsDetected(detected)
-                }
-
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
-                    val provider = cameraProviderFuture.get()
-                    val preview = Preview.Builder().build()
-                        .also { it.surfaceProvider = pv.surfaceProvider }
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(1280, 720))
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-                        .also { it.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer) }
-                    provider.unbindAll()
-                    provider.bindToLifecycle(
-                        lifecycleOwner,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        imageAnalysis
-                    )
-                }, ContextCompat.getMainExecutor(ctx))
+                )
 
                 pv
             }
         )
 
-        // ── Overlay Canvas — coords are already in view space ──────
+        // Overlay — draws from the prop overlayQrs
         Canvas(modifier = Modifier.fillMaxSize()) {
             for ((qr, color) in overlayQrs) {
                 val box = qr.boundingBox
+                if (box.isEmpty) continue
+
                 val drawColor = when (color) {
                     OverlayColor.YELLOW -> Color.Yellow
                     OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
@@ -146,12 +124,14 @@ fun CameraPreview(
                     size = ComposeSize(box.width().toFloat(), box.height().toFloat())
                 )
 
-                val label = buildLabel(qr, color)
-                if (label.isNotEmpty()) {
+                val label = buildQuickLabel(qr, color)
+                if (label != null) {
                     val paint = android.graphics.Paint().apply {
                         this.color = drawColor.toArgb()
-                        textSize = 36f; isAntiAlias = true
-                        typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true
+                        textSize = 36f
+                        isAntiAlias = true
+                        typeface = android.graphics.Typeface.MONOSPACE
+                        isFakeBoldText = true
                     }
                     val bg = android.graphics.Paint().apply {
                         this.color = android.graphics.Color.argb(200, 0, 0, 0)
@@ -168,7 +148,7 @@ fun CameraPreview(
             drawAimReticle(size)
         }
 
-        // ── Tap gesture overlay ──────────────────────────────────────
+        // Tap overlay
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -187,12 +167,15 @@ fun CameraPreview(
     }
 }
 
-private fun buildLabel(qr: DetectedQr, color: OverlayColor): String {
-    if (color == OverlayColor.RED_NON_MATCH) return ""
-    return when (val parsed = parseQrRaw(qr.rawValue)) {
-        is QrParseResult.Container -> "📦 ${parsed.cid.take(8)}…"
-        is QrParseResult.LcscBag -> "🔩 ${parsed.lcscPartNumber}"
-        is QrParseResult.Unknown -> ""
+private val qrLabelCache = mutableMapOf<String, String?>()
+private fun buildQuickLabel(qr: DetectedQr, color: OverlayColor): String? {
+    if (color == OverlayColor.RED_NON_MATCH) return null
+    return qrLabelCache.getOrPut(qr.rawValue) {
+        when (val p = parseQrRaw(qr.rawValue)) {
+            is QrParseResult.Container -> "📦 ${p.cid.take(8)}…"
+            is QrParseResult.LcscBag -> "🔩 ${p.lcscPartNumber}"
+            is QrParseResult.Unknown -> null
+        }
     }
 }
 
