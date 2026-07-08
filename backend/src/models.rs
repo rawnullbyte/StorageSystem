@@ -1,43 +1,40 @@
-//! Data models matching the database schema and API request/response types.
-
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
-// Database row types (mapped by SQLx)
-// ---------------------------------------------------------------------------
+// ── Storage Layer ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct StorageLayer {
     pub id: i32,
     pub name: String,
     pub description: Option<String>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<String>,
 }
+
+// ── Container (id is TEXT in SQLite — accepts any string, not just UUID) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Container {
-    pub id: Uuid,
+    pub id: String,
     pub display_name: String,
     pub storage_layer_id: i32,
-    pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
-/// Flattened bag + container + layer for list endpoints
+// ── Bags with details ───────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct BagWithDetails {
     pub bag_id: i32,
-    pub container_id: Uuid,
+    pub container_id: String,
     pub lcsc_part_number: String,
     pub mfg_part_number: String,
     pub initial_quantity: i32,
     pub current_quantity: i32,
     pub order_number: Option<String>,
     pub package_bill_no: Option<String>,
-    pub scanned_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub scanned_at: Option<String>,
+    pub updated_at: Option<String>,
     pub description: Option<String>,
     pub manufacturer: Option<String>,
     pub package_type: Option<String>,
@@ -56,12 +53,28 @@ pub struct LcscPart {
     pub package_type: Option<String>,
     pub datasheet_url: Option<String>,
     pub price_usd_json: Option<String>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// API request payloads
-// ---------------------------------------------------------------------------
+// ── Tags ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[allow(dead_code)]
+pub struct ContainerTag {
+    pub id: i32,
+    pub container_id: String,
+    pub tag: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[allow(dead_code)]
+pub struct ComponentTag {
+    pub id: i32,
+    pub bag_id: i32,
+    pub tag: String,
+}
+
+// ── API Requests ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 pub struct CreateLayerRequest {
@@ -73,7 +86,7 @@ pub struct CreateLayerRequest {
 pub struct CreateContainerRequest {
     pub display_name: String,
     pub storage_layer_id: i32,
-    pub id: Option<Uuid>, // optional; if missing, server generates
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,7 +97,7 @@ pub struct UpdateContainerRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct AddBagRequest {
-    pub container_id: Uuid,
+    pub container_id: String,
     pub lcsc_part_number: String,
     #[allow(dead_code)]
     pub mfg_part_number: String,
@@ -95,7 +108,7 @@ pub struct AddBagRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateQuantityRequest {
-    pub container_id: Uuid,
+    pub container_id: String,
     pub lcsc_part_number: String,
     pub quantity: i32,
 }
@@ -105,9 +118,12 @@ pub struct SearchRequest {
     pub term: String,
 }
 
-// ---------------------------------------------------------------------------
-// API response types
-// ---------------------------------------------------------------------------
+#[derive(Debug, Deserialize)]
+pub struct TagRequest {
+    pub tag: String,
+}
+
+// ── API Responses ───────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 pub struct AddBagResponse {
@@ -118,32 +134,23 @@ pub struct AddBagResponse {
 
 #[derive(Debug, Serialize)]
 pub struct SearchResult {
-    pub matched_containers: Vec<Uuid>,
+    pub matched_containers: Vec<String>,
     pub matched_part_numbers: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket event types
-// ---------------------------------------------------------------------------
+// ── WebSocket Events ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum WsEvent {
     #[serde(rename = "BagAdded")]
-    BagAdded {
-        container_id: Uuid,
-        lcsc_part_number: String,
-        quantity: i32,
-    },
+    BagAdded { container_id: String, lcsc_part_number: String, quantity: i32 },
     #[serde(rename = "QuantityUpdated")]
-    QuantityUpdated {
-        container_id: Uuid,
-        lcsc_part_number: String,
-        new_quantity: i32,
-    },
+    QuantityUpdated { container_id: String, lcsc_part_number: String, new_quantity: i32 },
+    #[serde(rename = "ContainerCreated")]
+    ContainerCreated { container_id: String, layer_id: i32 },
     #[serde(rename = "ContainerMoved")]
-    ContainerMoved {
-        container_id: Uuid,
-        new_layer_id: i32,
-    },
+    ContainerMoved { container_id: String, new_layer_id: i32 },
+    #[serde(rename = "LayerCreated")]
+    LayerCreated { layer_id: i32, name: String },
 }
