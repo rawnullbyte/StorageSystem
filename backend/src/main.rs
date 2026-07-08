@@ -31,7 +31,6 @@ use axum::routing::{get, patch, post};
 use axum::Router;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
-use std::sync::Arc;
 use tower::service_fn;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
