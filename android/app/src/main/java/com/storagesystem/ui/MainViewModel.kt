@@ -168,14 +168,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            // Use cid as both display name (truncated) and UUID
-            val displayName = result.cid.take(8)
+            // If cid is not a valid UUID, generate one (the backend requires UUID format)
+            val containerId = if (result.cid.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")))
+                result.cid
+            else
+                java.util.UUID.randomUUID().toString()
+
+            val displayName = result.cid.take(12)
             repository.registerContainer(
                 displayName = displayName,
                 layerId = layerId,
-                containerId = result.cid
+                containerId = containerId
             ).onSuccess {
-                Log.i(TAG, "Container ${result.cid} registered to layer $layerId")
+                Log.i(TAG, "Container $containerId registered to layer $layerId")
                 _toastMessage.emit("Container registered")
                 loadContainers(layerId)
             }.onFailure { e ->
