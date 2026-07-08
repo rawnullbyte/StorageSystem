@@ -27,7 +27,8 @@ use std::net::SocketAddr;
 
 use axum::routing::{get, patch, post};
 use axum::Router;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use std::str::FromStr;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
@@ -55,9 +56,13 @@ async fn main() -> anyhow::Result<()> {
             format!("sqlite:{}/inventory.db", dir.display())
         });
 
+    let sqlite_options = SqliteConnectOptions::from_str(&database_url)
+        .expect("Invalid DATABASE_URL")
+        .create_if_missing(true);
+
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect(&database_url)
+        .connect_with(sqlite_options)
         .await
         .expect("Failed to connect to SQLite");
 
