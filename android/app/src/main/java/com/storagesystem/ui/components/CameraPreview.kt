@@ -2,15 +2,14 @@ package com.storagesystem.ui.components
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Rect
+import android.graphics.Matrix
+import android.graphics.RectF
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageAnalysis.COORDINATE_SYSTEM_VIEW_REFERENCED
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.mlkit.vision.MlKitAnalyzer
 import androidx.camera.view.PreviewView
-import androidx.camera.mlkit.vision.MlKitAnalyzer.Result
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -28,24 +27,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE
 import com.storagesystem.data.models.DetectedQr
 import com.storagesystem.data.models.OverlayColor
-import com.storagesystem.data.models.QrType
 import com.storagesystem.data.repository.parseQrRaw
 import com.storagesystem.data.repository.QrParseResult
+import com.storagesystem.ui.camera.QrAnalyzer
 import java.util.concurrent.Executors
 import kotlin.math.sqrt
 
 /**
  * Camera preview with AR-style QR overlay.
  *
- * Uses [MlKitAnalyzer] with [MlKitAnalyzer.COORDINATE_SYSTEM_VIEW_REFERENCED],
- * which returns QR bounding boxes directly in PreviewView pixel coordinates.
- * The Canvas overlay draws at those same coordinates — no manual
- * image→view transformation needed.
+ * Uses [QrAnalyzer] (ML Kit via ImageAnalysis) to detect QR codes in
+ * **image coordinates** (1280×720), then maps them to **view coordinates**
+ * using [PreviewView.coordinatesTransform] for pixel-perfect overlay
+ * placement regardless of display rotation or aspect ratio.
  */
 @Composable
 fun CameraPreview(
@@ -56,43 +52,26 @@ fun CameraPreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Hold the CoordinateTransform (valid after PreviewView is laid out and camera is active)
     val latestQrs = remember { mutableStateListOf<DetectedQr>() }
+    val sensorToViewMat = remember { mutableStateOf<Matrix?>(null) }
+
     val hasCameraPermission = remember {
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // CameraX PreviewView + MlKitAnalyzer bound to lifecycle
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 val pv = PreviewView(ctx)
                 if (!hasCameraPermission) return@AndroidView pv
 
-                val scanner = BarcodeScanning.getClient(
-                    com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
-                        .setBarcodeFormats(FORMAT_QR_CODE)
-                        .build()
-                )
-
-                val mlKitAnalyzer = MlKitAnalyzer(
-                    listOf(scanner),
-                    COORDINATE_SYSTEM_VIEW_REFERENCED,
-                    ContextCompat.getMainExecutor(ctx)
-                ) { result: Result? ->
-                    val barcodes = result?.getValue(scanner)
-                        ?: emptyList<Barcode>()
-                    val detected = barcodes.mapNotNull { barcode ->
-                        val raw = barcode.rawValue ?: return@mapNotNull null
-                        DetectedQr(
-                            rawValue = raw,
-                            boundingBox = barcode.boundingBox ?: Rect(0, 0, 0, 0),
-                            qrType = classifyQr(raw)
-                        )
-                    }
+                val analyzer = QrAnalyzer { qrs ->
                     latestQrs.clear()
-                    latestQrs.addAll(detected)
-                    onQrsDetected(detected)
+                    latestQrs.addAll(qrs)
+                    onQrsDetected(qrs)
                 }
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
@@ -101,9 +80,10 @@ fun CameraPreview(
                     val preview = Preview.Builder().build()
                         .also { it.surfaceProvider = pv.surfaceProvider }
                     val imageAnalysis = ImageAnalysis.Builder()
+                        .setTargetResolution(Size(1280, 720))
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
-                        .also { it.setAnalyzer(Executors.newSingleThreadExecutor(), mlKitAnalyzer) }
+                        .also { it.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer) }
                     provider.unbindAll()
                     provider.bindToLifecycle(
                         lifecycleOwner,
@@ -111,7 +91,19 @@ fun CameraPreview(
                         preview,
                         imageAnalysis
                     )
+
+                    // Grab the sensor→view matrix once the camera is bound
+                    try {
+                        sensorToViewMat.value = pv.getSensorToViewTransform()
+                    } catch (_: Exception) { }
                 }, ContextCompat.getMainExecutor(ctx))
+
+                // Also update on layout changes
+                pv.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    try {
+                        sensorToViewMat.value = pv.getSensorToViewTransform()
+                    } catch (_: Exception) { }
+                }
 
                 pv
             }
@@ -119,8 +111,16 @@ fun CameraPreview(
 
         // ── AR Overlay Canvas ─────────────────────────────────────────
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val mat = sensorToViewMat.value
+
             for ((qr, color) in overlayQrs) {
-                val box = qr.boundingBox
+                // Map from sensor coordinates (QR bounding box) → view coordinates
+                val mapped = RectF(qr.boundingBox.left.toFloat(), qr.boundingBox.top.toFloat(),
+                                   qr.boundingBox.right.toFloat(), qr.boundingBox.bottom.toFloat())
+                if (mat != null) {
+                    mat.mapRect(mapped)
+                }
+
                 val drawColor = when (color) {
                     OverlayColor.YELLOW -> Color.Yellow
                     OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
@@ -129,12 +129,14 @@ fun CameraPreview(
                 }
                 val strokeW = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
 
+                // Bounding box outline
                 drawRect(
                     color = drawColor,
-                    topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
-                    size = ComposeSize(box.width().toFloat(), box.height().toFloat()),
+                    topLeft = Offset(mapped.left.toFloat(), mapped.top.toFloat()),
+                    size = ComposeSize(mapped.width().toFloat(), mapped.height().toFloat()),
                     style = Stroke(width = strokeW)
                 )
+                // Translucent fill
                 drawRect(
                     color = drawColor.copy(alpha = when (color) {
                         OverlayColor.GREEN_MATCH -> 0.3f
@@ -142,11 +144,11 @@ fun CameraPreview(
                         OverlayColor.BLUE -> 0.2f
                         else -> 0.15f
                     }),
-                    topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
-                    size = ComposeSize(box.width().toFloat(), box.height().toFloat())
+                    topLeft = Offset(mapped.left.toFloat(), mapped.top.toFloat()),
+                    size = ComposeSize(mapped.width().toFloat(), mapped.height().toFloat())
                 )
 
-                // Floating label above box
+                // Floating label above the box
                 val label = buildLabel(qr, color)
                 if (label.isNotEmpty()) {
                     val paint = android.graphics.Paint().apply {
@@ -156,19 +158,20 @@ fun CameraPreview(
                         typeface = android.graphics.Typeface.MONOSPACE
                         isFakeBoldText = true
                     }
-                    val bg = android.graphics.Paint().apply {
+                    val bgPaint = android.graphics.Paint().apply {
                         this.color = android.graphics.Color.argb(200, 0, 0, 0)
                     }
                     val tw = paint.measureText(label)
-                    val lx = (box.left + box.right - tw.toInt()) / 2f
-                    val ly = (box.top - 12f).coerceAtLeast(4f)
+                    val lx = (mapped.left + mapped.right - tw.toInt()) / 2f
+                    val ly = (mapped.top - 12f).coerceAtLeast(4f)
 
                     drawContext.canvas.nativeCanvas.drawRoundRect(
-                        lx - 8f, ly - 28f, lx + tw + 8f, ly + 6f, 6f, 6f, bg
+                        lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bgPaint
                     )
                     drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
                 }
             }
+
             drawAimReticle(size)
         }
 
@@ -178,9 +181,13 @@ fun CameraPreview(
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectTapGestures { tapOffset ->
+                        val mat = sensorToViewMat.value
                         val tapped = latestQrs.minByOrNull { qr ->
-                            val cx = qr.boundingBox.centerX().toFloat()
-                            val cy = qr.boundingBox.centerY().toFloat()
+                            val mapped = RectF(qr.boundingBox.left.toFloat(), qr.boundingBox.top.toFloat(),
+                                               qr.boundingBox.right.toFloat(), qr.boundingBox.bottom.toFloat())
+                            if (mat != null) mat.mapRect(mapped)
+                            val cx = mapped.centerX()
+                            val cy = mapped.centerY()
                             sqrt((tapOffset.x - cx) * (tapOffset.x - cx) + (tapOffset.y - cy) * (tapOffset.y - cy))
                         }
                         if (tapped != null) onTapQr(tapped)
@@ -199,28 +206,18 @@ private fun buildLabel(qr: DetectedQr, color: OverlayColor): String {
     }
 }
 
+/** Center aiming reticle (4 corner brackets). */
 private fun DrawScope.drawAimReticle(size: ComposeSize) {
     val cx = size.width / 2f
     val cy = size.height / 2f
     val r = 60f; val bl = 24f
     val c = Color.White.copy(alpha = 0.5f)
-    fun l(x1: Float, y1: Float, x2: Float, y2: Float) =
-        drawLine(c, Offset(x1, y1), Offset(x2, y2), strokeWidth = 3f)
-    l(cx - r, cy - r, cx - r + bl, cy - r)
-    l(cx - r, cy - r, cx - r, cy - r + bl)
-    l(cx + r, cy - r, cx + r - bl, cy - r)
-    l(cx + r, cy - r, cx + r, cy - r + bl)
-    l(cx - r, cy + r, cx - r + bl, cy + r)
-    l(cx - r, cy + r, cx - r, cy + r - bl)
-    l(cx + r, cy + r, cx + r - bl, cy + r)
-    l(cx + r, cy + r, cx + r, cy + r - bl)
-}
-
-private fun classifyQr(rawValue: String): QrType {
-    val trimmed = rawValue.trim()
-    return when {
-        trimmed.startsWith("{") && trimmed.contains("\"cid\"") -> QrType.CONTAINER
-        trimmed.startsWith("{") && trimmed.contains("=") -> QrType.LCSC_BAG
-        else -> QrType.UNKNOWN
-    }
+    drawLine(c, Offset(cx - r, cy - r), Offset(cx - r + bl, cy - r), strokeWidth = 3f)
+    drawLine(c, Offset(cx - r, cy - r), Offset(cx - r, cy - r + bl), strokeWidth = 3f)
+    drawLine(c, Offset(cx + r, cy - r), Offset(cx + r - bl, cy - r), strokeWidth = 3f)
+    drawLine(c, Offset(cx + r, cy - r), Offset(cx + r, cy - r + bl), strokeWidth = 3f)
+    drawLine(c, Offset(cx - r, cy + r), Offset(cx - r + bl, cy + r), strokeWidth = 3f)
+    drawLine(c, Offset(cx - r, cy + r), Offset(cx - r, cy + r - bl), strokeWidth = 3f)
+    drawLine(c, Offset(cx + r, cy + r), Offset(cx + r - bl, cy + r), strokeWidth = 3f)
+    drawLine(c, Offset(cx + r, cy + r), Offset(cx + r, cy + r - bl), strokeWidth = 3f)
 }
