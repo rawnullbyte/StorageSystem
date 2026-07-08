@@ -161,11 +161,15 @@ fun ScannerScreen(viewModel: MainViewModel) {
                             ScanMode.ASSIGN_BAG -> {
                                 if (assignPhase == "select_container" && parsed is QrParseResult.Container) {
                                     val cid = parsed.cid
-                                    val match = containers.find { it.id == cid }
+                                    // Match by UUID first, fall back to display_name (for auto-registered
+                                    // containers where the QR cid gets stored as display_name)
+                                    var match = containers.find { it.id == cid }
+                                    if (match == null) match = containers.find { it.display_name == cid || cid.startsWith(it.display_name) || it.display_name.startsWith(cid.take(12)) }
+                                    Log.d(TAG, "Assign: scanned cid=$cid, containers=${containers.size}, match=${match?.display_name}")
                                     if (match != null) {
                                         selectedContainer = match
                                         assignPhase = "scan_bag"
-                                        viewModel.updateDetectedQrs(emptyList()) // clear overlays
+                                        viewModel.updateDetectedQrs(emptyList())
                                         coroutineScope.launch { snackbarHostState.showSnackbar("Selected ${match.display_name}") }
                                     } else {
                                         coroutineScope.launch { snackbarHostState.showSnackbar("Container not found on this layer") }
@@ -206,7 +210,6 @@ fun ScannerScreen(viewModel: MainViewModel) {
                                             viewModel.setScanMode(mode)
                                             assignPhase = "select_container"
                                             selectedContainer = null
-                                            if (mode != ScanMode.SEARCH) viewModel.loadContainers(selectedLayerId)
                                         },
                                         label = { Text(label, fontSize = 13.sp) },
                                         leadingIcon = { Icon(icon, null, Modifier.size(16.dp)) },

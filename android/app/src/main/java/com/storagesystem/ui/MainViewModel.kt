@@ -43,6 +43,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _searchTerm.value = ""
             _searchResult.value = null
         }
+        // Refresh containers for Assign mode so the list is up to date
+        if (mode == ScanMode.ASSIGN_BAG) {
+            loadContainers(_selectedLayerId.value)
+        }
     }
 
     // ─── Layers ─────────────────────────────────────────────────────
