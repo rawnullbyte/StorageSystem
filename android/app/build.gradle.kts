@@ -3,6 +3,14 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Read version from root VERSION file (e.g. "0.1.9")
+val appVersion: String = try {
+    file("../../VERSION").readText().trim()
+} catch (_: Exception) { "0.1.0" }
+val (appMajor, appMinor, appPatch) = appVersion.split(".").map { it.toIntOrNull() ?: 0 }
+// versionCode must monotonically increase: major*100000 + minor*1000 + patch
+val appVersionCode = appMajor * 100000 + appMinor * 1000 + appPatch
+
 android {
     namespace = "com.storagesystem"
     compileSdk = 34
@@ -11,8 +19,8 @@ android {
         applicationId = "com.storagesystem"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
 
         // Backend URL — override via buildConfigField or gradle property
         buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8000\"")
