@@ -156,6 +156,13 @@ jobs:
           name: storage-backend-x86_64-linux
           path: artifacts/
 
+      - name: Rename backend binary for release
+        shell: bash
+        run: |
+          # download-artifact preserves the original filename from the upload path,
+          # which is 'storage-backend'. Rename to include platform info.
+          mv artifacts/storage-backend artifacts/storage-backend-x86_64-linux
+
       - name: Download Android APK
         uses: actions/download-artifact@v4
         with:
