@@ -40,10 +40,16 @@ async fn main() -> anyhow::Result<()> {
     // Load .env if present
     dotenvy::dotenv().ok();
 
-    // Initialise tracing
+    // Initialise tracing — default to info if RUST_LOG not set
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        )
         .init();
+
+    // Ensure we always print to stderr even before tracing is ready
+    eprintln!("StorageSystem backend starting…");
 
     // Database connection pool (SQLite file-based)
     let database_url = std::env::var("DATABASE_URL")
