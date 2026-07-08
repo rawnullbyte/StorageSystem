@@ -86,6 +86,7 @@ pub struct UpdateContainerRequest {
 pub struct AddBagRequest {
     pub container_id: Uuid,
     pub lcsc_part_number: String,
+    #[allow(dead_code)]
     pub mfg_part_number: String,
     pub quantity: i32,
     pub order_number: Option<String>,

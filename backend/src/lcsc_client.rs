@@ -12,6 +12,7 @@ use tracing::{debug, info, warn};
 /// Part information fetched from LCSC / fallback.
 #[derive(Debug, Clone, Default)]
 pub struct PartInfo {
+    #[allow(dead_code)]
     pub lcsc_part_number: String,
     pub mfg_part_number: String,
     pub description: Option<String>,
@@ -161,8 +162,7 @@ pub async fn easyeda_fallback(lcsc_number: &str) -> Result<Option<PartInfo>> {
         datasheet_url: r
             .get("datasheet")
             .and_then(|v| v.as_str())
-            .map(|s| if s.is_empty() { None } else { Some(s.to_string()) })
-            .flatten(),
+            .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
     });
 
     Ok(info)
