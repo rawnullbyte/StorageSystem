@@ -155,14 +155,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Handle a parsed QR code based on the current [ScanMode].
      */
     fun handleQrScan(parseResult: QrParseResult) {
+        val auto = ServerSettings.autoScan()
         when (parseResult) {
-            is QrParseResult.Container -> handleContainerScan(parseResult)
-            is QrParseResult.LcscBag -> handleBagScan(parseResult)
+            is QrParseResult.Container -> {
+                handleContainerScan(parseResult)
+                // Auto-scan: also register without requiring a tap
+            }
+            is QrParseResult.LcscBag -> {
+                handleBagScan(parseResult)
+                // Auto-assign: if there's exactly one container on the selected layer, auto-assign
+                if (auto) {
+                    val containers = _containers.value
+                    val layerId = _selectedLayerId.value
+                    if (containers.size == 1 && layerId != null && parseResult.lcscPartNumber.isNotBlank()) {
+                        assignBagToContainer(containers.first().id, parseResult)
+                    } else if (containers.size > 1 && layerId != null) {
+                        Log.i(TAG, "Auto-scan: $containers containers on layer, need user to pick one")
+                    }
+                }
+            }
             is QrParseResult.Unknown -> {
                 viewModelScope.launch { _toastMessage.emit("Unknown QR code format") }
             }
         }
     }
+
+    private fun handleContainerScan(result: QrParseResult.Container) {
+        val layerId = _selectedLayerId.value
+        if (layerId == null) {
+            viewModelScope.launch { _toastMessage.emit("Select a layer first") }
+            return
+        }
 
     private fun handleContainerScan(result: QrParseResult.Container) {
         val layerId = _selectedLayerId.value

@@ -13,6 +13,10 @@ object ServerSettings {
     private const val PREFS_NAME = "storage_system_prefs"
     private const val KEY_API_BASE_URL = "api_base_url"
     private const val KEY_WS_URL = "ws_url"
+    private const val KEY_AUTO_SCAN = "auto_scan"
+
+    fun autoScan(): Boolean = prefs()?.getBoolean(KEY_AUTO_SCAN, false) ?: false
+    fun setAutoScan(enabled: Boolean) { prefs()?.edit()?.putBoolean(KEY_AUTO_SCAN, enabled)?.apply() }
 
     private var prefs: SharedPreferences? = null
 
