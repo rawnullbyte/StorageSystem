@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 interface Layer { id: number; name: string; description: string | null; }
 interface Container { id: string; display_name: string; storage_layer_id: number; updated_at: string | null; }
 interface Bag {
-  bag_id: number; container_id: string; lcsc_part_number: string; mfg_part_number: string;
+  bag_id: number; container_id: string; lcsc_part_number: string;
   initial_quantity: number; current_quantity: number;
   package_bill_no: string | null;
   description: string | null; manufacturer: string | null; package_type: string | null; datasheet_url: string | null;
@@ -142,16 +142,14 @@ export default function App() {
           {(view === "layers" || view === "bags") && (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr style={{ background: "#f0f0f0", position: "sticky", top: 0 }}>
-                <th style={th}>Bag ID</th><th style={th}>LCSC Part</th><th style={th}>MFG Part</th><th style={th}>Qty</th>
+                <th style={th}>Bag ID</th><th style={th}>LCSC Part</th><th style={th}>Qty</th>
                 <th style={th}>Container</th><th style={th}>Layer</th><th style={th}></th>
               </tr></thead>
               <tbody>
-                {filteredBags.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#999" }}>No components</td></tr>}
+                {filteredBags.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#999" }}>No components</td></tr>}
                 {filteredBags.map((b, i) => (
                   <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
                     <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.package_bill_no || ""}>{b.package_bill_no || "—"}</td>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 12}}>{b.lcsc_part_number}</td>
-                    <td style={td}>{b.mfg_part_number || "—"}</td>
                     <td style={td} onDoubleClick={() => { setEditCell({row: b.bag_id, col: "qty"}); setEditVal(String(b.current_quantity)); }}>
                       {editCell?.row === b.bag_id && editCell?.col === "qty" ? (
                         <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}

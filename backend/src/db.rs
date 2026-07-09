@@ -162,7 +162,16 @@ pub async fn add_bag(
     };
     match result {
         Some(Some(qty)) => Ok((true, qty)),
-        _ => Ok((false, quantity)),
+        _ => {
+            // Conflict — fetch the actual stored quantity from existing bag
+            let existing = match package_bill_no {
+                Some(pbn) => sqlx::query_scalar::<_, i32>(
+                    "SELECT current_quantity FROM component_bags WHERE package_bill_no = ?"
+                ).bind(pbn).fetch_optional(pool).await?.unwrap_or(quantity),
+                None => quantity,
+            };
+            Ok((false, existing))
+        }
     }
 }
 
