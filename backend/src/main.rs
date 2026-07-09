@@ -103,7 +103,8 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(pool, lcsc_client);
 
     let app = Router::new()
-        .route("/api/layers", get(handlers::list_layers).post(handlers::create_layer).delete(handlers::delete_layer))
+        .route("/api/layers", get(handlers::list_layers).post(handlers::create_layer))
+        .route("/api/layers/{id}", delete(handlers::delete_layer))
         .route("/api/containers", get(handlers::list_containers).post(handlers::create_container))
         .route("/api/containers/{id}", patch(handlers::update_container).delete(handlers::delete_container))
         .route("/api/containers/{id}/tags", get(handlers::get_container_tags).post(handlers::add_container_tag))
