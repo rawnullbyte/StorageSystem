@@ -3,10 +3,12 @@ import { useEffect, useState, useCallback } from "react";
 interface Layer { id: number; name: string; description: string | null; }
 interface Container { id: string; display_name: string; storage_layer_id: number; updated_at: string | null; }
 interface Bag {
-  bag_id: number; container_id: string; lcsc_part_number: string; order_number: string | null;
-  initial_quantity: number; current_quantity: number;
-  package_bill_no: string | null;
-  description: string | null; manufacturer: string | null; package_type: string | null; datasheet_url: string | null;
+  bag_id: number; container_id: string; lcsc_part_number: string; mfg_part_number: string;
+  initial_quantity: number; current_quantity: number; order_number: string | null;
+  package_bill_no: string | null; manufacturer_code: string | null; carton_count: string | null;
+  packing_date: string | null; warehouse_code: string | null;
+  scanned_at: string | null; description: string | null; manufacturer: string | null;
+  package_type: string | null; datasheet_url: string | null;
   container_display_name: string; layer_name: string; layer_id: number;
 }
 
@@ -21,6 +23,9 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
 
 type View = "layers" | "containers" | "bags";
 
+const SORTABLE = ["bag_id","lcsc_part_number","mfg_part_number","current_quantity","order_number","package_bill_no","packing_date","scanned_at","container_display_name","layer_name"] as const;
+type SortCol = (typeof SORTABLE)[number];
+
 export default function App() {
   const [layers, setLayers] = useState<Layer[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
@@ -33,6 +38,8 @@ export default function App() {
   const [editVal, setEditVal] = useState("");
   const [layersExpanded, setLayersExpanded] = useState(true);
   const [containersExpanded, setContainersExpanded] = useState(true);
+  const [sortCol, setSortCol] = useState<SortCol>("bag_id");
+  const [sortDesc, setSortDesc] = useState(false);
 
   const load = useCallback(() => {
     api<Layer[]>("/api/layers").then(setLayers).catch(console.error);
@@ -60,10 +67,26 @@ export default function App() {
 
   const filteredBags = selectedContainer ? bags.filter(b => b.container_id === selectedContainer)
     : selectedLayer ? bags.filter(b => b.layer_id === selectedLayer)
-    : view === "bags" ? bags
     : bags;
 
+  // Sort
+  const sortedBags = [...filteredBags].sort((a, b) => {
+    const av = (a as any)[sortCol] ?? ""; const bv = (b as any)[sortCol] ?? "";
+    const cmp = typeof av === "number" ? av - (bv as number) : String(av).localeCompare(String(bv));
+    return sortDesc ? -cmp : cmp;
+  });
+
   const filteredContainers = selectedLayer ? containers.filter(c => c.storage_layer_id === selectedLayer) : containers;
+
+  function toggleSort(col: SortCol) {
+    if (sortCol === col) setSortDesc(p => !p);
+    else { setSortCol(col); setSortDesc(false); }
+  }
+
+  function sortArrow(col: SortCol) {
+    if (sortCol !== col) return " ↕";
+    return sortDesc ? " ↓" : " ↑";
+  }
 
   async function saveEdit(b: Bag) {
     if (editCell?.col === "qty") {
@@ -82,6 +105,12 @@ export default function App() {
     if (confirm("Delete this layer and everything in it?")) { await api(`/api/layers/${id}`, { method: "DELETE" }).catch(console.error); load(); }
   }
 
+  const Th = ({ col, children }: { col: SortCol; children: any }) => (
+    <th style={{ ...th, cursor: "pointer" }} onClick={() => toggleSort(col)}>
+      {children}{sortArrow(col)}
+    </th>
+  );
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", fontSize: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 16px", borderBottom: "1px solid #ccc", background: "#f5f5f5" }}>
@@ -97,7 +126,6 @@ export default function App() {
                   background: view === v ? "#e0e0e0" : "#fff", fontWeight: view === v ? 600 : 400, fontSize: 11 }}>{v}</button>
             ))}
           </div>
-
           <div style={{ marginTop: 4 }}>
             <div onClick={() => setLayersExpanded(p => !p)} style={{ padding: "4px 8px", cursor: "pointer", fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
               <span>{layersExpanded ? "▼" : "▶"}</span> Layers ({layers.length})
@@ -114,8 +142,7 @@ export default function App() {
                 </div>
                 {selectedLayer === l.id && filteredContainers.map(c => (
                   <div key={c.id} onClick={() => { setSelectedContainer(selectedContainer === c.id ? null : c.id); }}
-                    style={{ padding: "2px 8px 2px 40px", cursor: "pointer", fontSize: 12,
-                      background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
+                    style={{ padding: "2px 8px 2px 40px", cursor: "pointer", fontSize: 12, background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
                     {c.display_name}
                     <button onClick={e => { e.stopPropagation(); deleteContainer(c.id); }} style={{ marginLeft: 8, cursor:"pointer", border:"none", background:"none", fontSize:10, color:"#c00" }}>✕</button>
                   </div>
@@ -123,15 +150,13 @@ export default function App() {
               </div>
             ))}
           </div>
-
           {view === "containers" && <div style={{ marginTop: 12, borderTop: "1px solid #ddd", paddingTop: 8 }}>
             <div onClick={() => setContainersExpanded(p => !p)} style={{ padding: "4px 8px", cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
               <span>{containersExpanded ? "▼" : "▶"}</span> All Containers ({containers.length})
             </div>
             {containersExpanded && containers.map(c => (
               <div key={c.id} onClick={() => setSelectedContainer(selectedContainer === c.id ? null : c.id)}
-                style={{ padding: "2px 8px 2px 24px", cursor: "pointer", fontSize: 12,
-                  background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
+                style={{ padding: "2px 8px 2px 24px", cursor: "pointer", fontSize: 12, background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
                 {c.display_name}
               </div>
             ))}
@@ -142,22 +167,35 @@ export default function App() {
           {(view === "layers" || view === "bags") && (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr style={{ background: "#f0f0f0", position: "sticky", top: 0 }}>
-                <th style={th}>Bag ID</th><th style={th}>LCSC Part</th><th style={th}>Qty</th>
-                <th style={th}>Container</th><th style={th}>Layer</th><th style={th}></th>
+                <Th col="bag_id">#</Th>
+                <Th col="lcsc_part_number">LCSC Part</Th>
+                <Th col="mfg_part_number">MFG Part</Th>
+                <Th col="current_quantity">Qty</Th>
+                <Th col="order_number">Order #</Th>
+                <Th col="package_bill_no">PBN</Th>
+                <Th col="packing_date">PDI</Th>
+                <Th col="scanned_at">Added</Th>
+                <Th col="container_display_name">Container</Th>
+                <Th col="layer_name">Layer</Th>
+                <th style={th}></th>
               </tr></thead>
               <tbody>
-                {filteredBags.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#999" }}>No components</td></tr>}
-                {filteredBags.map((b, i) => (
+                {sortedBags.length === 0 && <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: "#999" }}>No components</td></tr>}
+                {sortedBags.map((b, i) => (
                   <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.order_number || ""}>{b.order_number || b.package_bill_no || "—"}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 10, color: "#666" }}>{b.bag_id}</td>
                     <td style={{...td, fontFamily: "monospace", fontSize: 12}}>{b.lcsc_part_number}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 11, color: "#666"}}>{b.mfg_part_number || "—"}</td>
                     <td style={td} onDoubleClick={() => { setEditCell({row: b.bag_id, col: "qty"}); setEditVal(String(b.current_quantity)); }}>
                       {editCell?.row === b.bag_id && editCell?.col === "qty" ? (
-                        <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
-                          onBlur={() => saveEdit(b)} onKeyDown={e => { if(e.key === "Enter") saveEdit(b); if(e.key === "Escape") setEditCell(null); }}
+                        <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)} onBlur={() => saveEdit(b)} onKeyDown={e => { if(e.key === "Enter") saveEdit(b); if(e.key === "Escape") setEditCell(null); }}
                           style={{ width: 60, border: "1px solid #3b82f6", borderRadius: 2, padding: "1px 4px", fontSize: 13 }} />
                       ) : <span style={{ fontWeight: 600, cursor: "pointer" }}>{b.current_quantity}</span>}
                     </td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 11}}>{b.order_number || "—"}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 11}}>{b.package_bill_no || "—"}</td>
+                    <td style={{...td, fontSize: 11}}>{b.packing_date || "—"}</td>
+                    <td style={{...td, fontSize: 11, color: "#666"}}>{b.scanned_at ? b.scanned_at.replace("T"," ").slice(0,19) : "—"}</td>
                     <td style={td}>{b.container_display_name}</td>
                     <td style={td}>{b.layer_name}</td>
                     <td style={td}><button onClick={() => deleteBag(b.bag_id)} style={{ cursor:"pointer", border:"none", background:"none", fontSize:13, color:"#c00" }}>✕</button></td>
@@ -166,7 +204,6 @@ export default function App() {
               </tbody>
             </table>
           )}
-
           {view === "containers" && (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr style={{ background: "#f0f0f0", position: "sticky", top: 0 }}>
