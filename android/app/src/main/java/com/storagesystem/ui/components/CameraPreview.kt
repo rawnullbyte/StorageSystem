@@ -43,11 +43,20 @@ fun CameraPreview(
     overlayQrs: List<Pair<DetectedQr, OverlayColor>>,
     onQrsDetected: (List<DetectedQr>) -> Unit,
     onTapQr: (DetectedQr) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    torchOn: Boolean = false,
+    onTorchChanged: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestQrs = remember { mutableStateListOf<DetectedQr>() }
+    val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
+
+    // Torch control
+    LaunchedEffect(torchOn, controllerRef.value) {
+        val ctrl = controllerRef.value ?: return@LaunchedEffect
+        try { ctrl.enableTorch(torchOn) } catch (_: Exception) {}
+    }
 
     LaunchedEffect(overlayQrs) {
         latestQrs.clear()
@@ -69,6 +78,7 @@ fun CameraPreview(
                     cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                     bindToLifecycle(lifecycleOwner)
                 }
+                controllerRef.value = controller
                 pv.controller = controller
 
                 val scanner = BarcodeScanning.getClient(
@@ -99,66 +109,41 @@ fun CameraPreview(
                     }
                 )
 
-                // Direct touch listener — bypasses Compose gesture routing entirely.
-                // This is the only reliable way to capture taps on top of PreviewView.
                 pv.setOnTouchListener { _: View, event: MotionEvent ->
                     if (event.action == MotionEvent.ACTION_UP) {
-                        val tx = event.x
-                        val ty = event.y
-                        Log.d(TAG, "Touch at ($tx, $ty), ${latestQrs.size} QRs")
+                        val tx = event.x; val ty = event.y
                         val tapped = latestQrs.minByOrNull { qr ->
                             val r = qr.boundingBox
-                            val cx = (r.left + r.right) / 2f
-                            val cy = (r.top + r.bottom) / 2f
-                            val dx = tx - cx
-                            val dy = ty - cy
-                            sqrt(dx * dx + dy * dy)
+                            val cx = (r.left + r.right) / 2f; val cy = (r.top + r.bottom) / 2f
+                            sqrt((tx - cx) * (tx - cx) + (ty - cy) * (ty - cy))
                         }
-                        if (tapped != null) {
-                            Log.d(TAG, "→ matched: ${tapped.rawValue.take(40)}")
-                            onTapQr(tapped)
-                        } else {
-                            Log.d(TAG, "→ no match (closest dist)")
-                        }
+                        if (tapped != null) onTapQr(tapped)
                     }
-                    // Return false so Compose can still process if needed
                     false
                 }
-
                 pv
             }
         )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             for ((qr, color) in overlayQrs) {
-                val box = qr.boundingBox
-                if (box.isEmpty) continue
-
+                val box = qr.boundingBox; if (box.isEmpty) continue
                 val drawColor = when (color) {
-                    OverlayColor.YELLOW -> Color.Yellow
-                    OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
-                    OverlayColor.BLUE -> Color.Blue
-                    OverlayColor.RED_NON_MATCH -> Color.Red
+                    OverlayColor.YELLOW -> Color.Yellow; OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
+                    OverlayColor.BLUE -> Color.Blue; OverlayColor.RED_NON_MATCH -> Color.Red
                 }
-                val strokeW = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
-                drawRect(color = drawColor, topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
-                    size = ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = strokeW))
-                drawRect(color = drawColor.copy(alpha = when (color) {
-                        OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f
-                        OverlayColor.BLUE -> 0.2f; else -> 0.15f
-                    }),
-                    topLeft = Offset(box.left.toFloat(), box.top.toFloat()),
-                    size = ComposeSize(box.width().toFloat(), box.height().toFloat()))
+                val sw = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
+                drawRect(drawColor, Offset(box.left.toFloat(), box.top.toFloat()),
+                    ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = sw))
+                drawRect(drawColor.copy(alpha = when (color) { OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f; OverlayColor.BLUE -> 0.2f; else -> 0.15f }),
+                    Offset(box.left.toFloat(), box.top.toFloat()), ComposeSize(box.width().toFloat(), box.height().toFloat()))
 
                 val label = buildQuickLabel(qr, color) ?: continue
-                val paint = android.graphics.Paint().apply {
-                    this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
-                    typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true
-                }
+                val paint = android.graphics.Paint().apply { this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
+                    typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true }
                 val bg = android.graphics.Paint().apply { this.color = android.graphics.Color.argb(200, 0, 0, 0) }
                 val tw = paint.measureText(label)
-                val lx = (box.left + box.right - tw.toInt()) / 2f
-                val ly = (box.top - 12f).coerceAtLeast(4f)
+                val lx = (box.left + box.right - tw.toInt()) / 2f; val ly = (box.top - 12f).coerceAtLeast(4f)
                 drawContext.canvas.nativeCanvas.drawRoundRect(lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg)
                 drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
             }
@@ -171,18 +156,12 @@ private val qrLabelCache = mutableMapOf<String, String?>()
 private fun buildQuickLabel(qr: DetectedQr, color: OverlayColor): String? {
     if (color == OverlayColor.RED_NON_MATCH) return null
     return qrLabelCache.getOrPut(qr.rawValue) {
-        when (val p = parseQrRaw(qr.rawValue)) {
-            is QrParseResult.Container -> "📦 ${p.cid.take(8)}…"
-            is QrParseResult.LcscBag -> "🔩 ${p.lcscPartNumber}"
-            is QrParseResult.Unknown -> null
-        }
+        when (val p = parseQrRaw(qr.rawValue)) { is QrParseResult.Container -> "📦 ${p.cid.take(8)}…"
+            is QrParseResult.LcscBag -> "🔩 ${p.lcscPartNumber}"; is QrParseResult.Unknown -> null }
     }
 }
-
 private fun DrawScope.drawAimReticle(size: ComposeSize) {
-    val cx = size.width / 2f; val cy = size.height / 2f
-    val r = 60f; val bl = 24f
-    val c = Color.White.copy(alpha = 0.5f)
+    val cx = size.width / 2f; val cy = size.height / 2f; val r = 60f; val bl = 24f; val c = Color.White.copy(alpha = 0.5f)
     drawLine(c, Offset(cx - r, cy - r), Offset(cx - r + bl, cy - r), strokeWidth = 3f)
     drawLine(c, Offset(cx - r, cy - r), Offset(cx - r, cy - r + bl), strokeWidth = 3f)
     drawLine(c, Offset(cx + r, cy - r), Offset(cx + r - bl, cy - r), strokeWidth = 3f)
@@ -192,12 +171,9 @@ private fun DrawScope.drawAimReticle(size: ComposeSize) {
     drawLine(c, Offset(cx + r, cy + r), Offset(cx + r - bl, cy + r), strokeWidth = 3f)
     drawLine(c, Offset(cx + r, cy + r), Offset(cx + r, cy + r - bl), strokeWidth = 3f)
 }
-
 private fun classifyQr(rawValue: String): QrType {
-    val trimmed = rawValue.trim()
-    return when {
-        trimmed.startsWith("{") && trimmed.contains("\"cid\"") -> QrType.CONTAINER
-        trimmed.startsWith("{") && (trimmed.contains("=") || trimmed.contains("pbn:") || trimmed.contains(",pc:")) -> QrType.LCSC_BAG
-        else -> QrType.UNKNOWN
-    }
+    val t = rawValue.trim()
+    return when { t.startsWith("{") && t.contains("\"cid\"") -> QrType.CONTAINER
+        t.startsWith("{") && (t.contains("=") || t.contains("pbn:") || t.contains(",pc:")) -> QrType.LCSC_BAG
+        else -> QrType.UNKNOWN }
 }

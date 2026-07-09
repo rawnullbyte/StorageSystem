@@ -44,7 +44,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _searchTerm.value = ""
             _searchResult.value = null
         }
-        // Refresh containers for Assign mode so the list is up to date
+        seenQrs.clear()
         if (mode == ScanMode.ASSIGN_BAG) {
             loadContainers(_selectedLayerId.value)
         }
@@ -72,8 +72,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _detectedQrs = MutableStateFlow<List<DetectedQr>>(emptyList())
     val detectedQrs: StateFlow<List<DetectedQr>> = _detectedQrs.asStateFlow()
 
+    // Track which raw QR values we've seen (to avoid re-processing every frame)
+    private val seenQrs = mutableSetOf<String>()
+
     fun updateDetectedQrs(qrs: List<DetectedQr>) {
         _detectedQrs.value = qrs
+
+        // Auto-scan: automatically handle newly detected QRs without tapping
+        if (ServerSettings.autoScan()) {
+            val mode = _scanMode.value
+            for (qr in qrs) {
+                if (qr.rawValue in seenQrs) continue
+                seenQrs.add(qr.rawValue)
+                val parsed = parseQrCode(qr.rawValue)
+
+                if (mode == ScanMode.AUTO_IMPORT_CONTAINERS && parsed is QrParseResult.Container) {
+                    handleQrScan(parsed)
+                } else if (mode == ScanMode.ASSIGN_BAG && parsed is QrParseResult.LcscBag && parsed.lcscPartNumber.isNotBlank()) {
+                    // If container already selected, auto-assign
+                    val selContainer = _containers.value
+                    if (selContainer.size == 1) {
+                        assignBagToContainer(selContainer.first().id, parsed)
+                    }
+                }
+            }
+        }
     }
 
     // ─── Toast messages ─────────────────────────────────────────────
@@ -200,16 +223,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 layerId = layerId,
                 containerId = containerId
             ).onSuccess { registered ->
-                Log.i(TAG, "Container $containerId registered to layer $layerId: ${registered.display_name}")
-
-                // Immediately insert into local list so the data is available
-                // even before the async loadContainers() call returns
-                val current = _containers.value.toMutableList()
-                current.add(registered)
-                _containers.value = current
-
-                _toastMessage.emit("Container registered: ${registered.display_name}")
-                // Refresh from server in background (overwrites local on completion)
+                // Check if this container was already known (dedup by backend)
+                val exists = _containers.value.any { it.id == registered.id }
+                if (!exists) {
+                    val current = _containers.value.toMutableList()
+                    current.add(registered)
+                    _containers.value = current
+                    _toastMessage.emit("Container registered: ${registered.display_name}")
+                } else {
+                    Log.i(TAG, "Container $containerId already exists on layer $layerId")
+                    _toastMessage.emit("Already registered: ${registered.display_name}")
+                }
                 loadContainers(layerId)
             }.onFailure { e ->
                 Log.w(TAG, "Container registration failed: ${e.message}")
