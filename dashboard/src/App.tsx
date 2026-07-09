@@ -4,13 +4,11 @@ interface Layer { id: number; name: string; description: string | null; }
 interface Container { id: string; display_name: string; storage_layer_id: number; updated_at: string | null; }
 interface Bag {
   bag_id: number; container_id: string; lcsc_part_number: string; mfg_part_number: string;
-  initial_quantity: number; current_quantity: number; order_number: string | null;
-  package_bill_no: string | null; manufacturer_code: string | null; carton_count: string | null;
-  packing_date: string | null; warehouse_code: string | null;
+  initial_quantity: number; current_quantity: number;
+  package_bill_no: string | null;
   description: string | null; manufacturer: string | null; package_type: string | null; datasheet_url: string | null;
   container_display_name: string; layer_name: string; layer_id: number;
 }
-interface Order { order_number: string; bag_count: number; total_qty: number; first_scanned: string | null; }
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
 const WS = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -21,17 +19,15 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   return r.json();
 }
 
-type View = "layers" | "containers" | "bags" | "orders";
+type View = "layers" | "containers" | "bags";
 
 export default function App() {
   const [layers, setLayers] = useState<Layer[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
   const [bags, setBags] = useState<Bag[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
   const [view, setView] = useState<View>("layers");
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [selectedContainer, setSelectedContainer] = useState<string | null>(null);
-  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState("connecting");
   const [editCell, setEditCell] = useState<{row: number; col: string} | null>(null);
   const [editVal, setEditVal] = useState("");
@@ -42,7 +38,6 @@ export default function App() {
     api<Layer[]>("/api/layers").then(setLayers).catch(console.error);
     api<Container[]>("/api/containers").then(setContainers).catch(console.error);
     api<Bag[]>("/api/components").then(setBags).catch(console.error);
-    api<Order[]>("/api/orders").then(setOrders).catch(console.error);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -65,9 +60,7 @@ export default function App() {
 
   const filteredBags = selectedContainer ? bags.filter(b => b.container_id === selectedContainer)
     : selectedLayer ? bags.filter(b => b.layer_id === selectedLayer)
-    : selectedOrder ? bags.filter(b => b.order_number === selectedOrder)
     : view === "bags" ? bags
-    : view === "orders" ? (selectedOrder ? bags.filter(b => b.order_number === selectedOrder) : [])
     : bags;
 
   const filteredContainers = selectedLayer ? containers.filter(c => c.storage_layer_id === selectedLayer) : containers;
@@ -79,34 +72,33 @@ export default function App() {
     setEditCell(null); load();
   }
 
-  async function renameLayer(l: Layer) {
-    const n = prompt("New name:", l.name); if (n && n !== l.name) {
-      await api(`/api/containers/${l.id}`, { method: "PATCH", body: JSON.stringify({ display_name: n }) }).catch(console.error); load();
-    }
+  async function deleteContainer(id: string) {
+    if (confirm("Delete this container?")) { await api(`/api/containers/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error); load(); }
   }
-
+  async function deleteBag(id: number) {
+    if (confirm("Delete this bag?")) { await api(`/api/components/${id}`, { method: "DELETE" }).catch(console.error); load(); }
+  }
   async function deleteLayer(id: number) {
-    if (confirm("Delete this layer and all its containers?")) { await api(`/api/layers/${id}`, { method: "DELETE" }).catch(console.error); load(); }
+    if (confirm("Delete this layer and everything in it?")) { await api(`/api/layers/${id}`, { method: "DELETE" }).catch(console.error); load(); }
   }
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", fontSize: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 16px", borderBottom: "1px solid #ccc", background: "#f5f5f5" }}>
         <strong>StorageSystem</strong>
-        <span style={{ fontSize: 12, color: "#666" }}>Inventory</span>
         <span style={{ marginLeft: "auto", fontSize: 12, color: wsStatus === "connected" ? "#16a34a" : "#dc2626" }}>● {wsStatus}</span>
       </div>
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <div style={{ width: 260, borderRight: "1px solid #ccc", overflow: "auto", background: "#fafafa", padding: 4, userSelect: "none" }}>
           <div style={{ display: "flex", gap: 2, margin: "6px 4px" }}>
-            {(["layers","containers","bags","orders"] as View[]).map(v => (
-              <button key={v} onClick={() => { setView(v); setSelectedOrder(null); }}
+            {(["layers","containers","bags"] as View[]).map(v => (
+              <button key={v} onClick={() => setView(v)}
                 style={{ flex: 1, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer",
                   background: view === v ? "#e0e0e0" : "#fff", fontWeight: view === v ? 600 : 400, fontSize: 11 }}>{v}</button>
             ))}
           </div>
 
-          {view !== "orders" && <div style={{ marginTop: 4 }}>
+          <div style={{ marginTop: 4 }}>
             <div onClick={() => setLayersExpanded(p => !p)} style={{ padding: "4px 8px", cursor: "pointer", fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
               <span>{layersExpanded ? "▼" : "▶"}</span> Layers ({layers.length})
               <button onClick={e => { e.stopPropagation(); const n = prompt("Layer name:"); if(n) api("/api/layers", { method: "POST", body: JSON.stringify({name:n}) }).then(load); }}
@@ -118,21 +110,19 @@ export default function App() {
                   style={{ padding: "3px 8px 3px 24px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 13,
                     background: selectedLayer === l.id ? "#dbeafe" : "transparent" }}>
                   <span>{selectedLayer === l.id ? "▼" : "▶"}</span> {l.name}
-                  <span style={{ marginLeft: "auto" }}>
-                    <button onClick={e => { e.stopPropagation(); renameLayer(l); }} style={{ cursor:"pointer", border:"none", background:"none", fontSize:11, color:"#666" }}>✎</button>
-                    <button onClick={e => { e.stopPropagation(); deleteLayer(l.id); }} style={{ cursor:"pointer", border:"none", background:"none", fontSize:11, color:"#c00" }}>✕</button>
-                  </span>
+                  <button onClick={e => { e.stopPropagation(); deleteLayer(l.id); }} style={{ marginLeft: "auto", cursor:"pointer", border:"none", background:"none", fontSize:11, color:"#c00" }}>✕</button>
                 </div>
                 {selectedLayer === l.id && filteredContainers.map(c => (
                   <div key={c.id} onClick={() => { setSelectedContainer(selectedContainer === c.id ? null : c.id); }}
                     style={{ padding: "2px 8px 2px 40px", cursor: "pointer", fontSize: 12,
                       background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
                     {c.display_name}
+                    <button onClick={e => { e.stopPropagation(); deleteContainer(c.id); }} style={{ marginLeft: 8, cursor:"pointer", border:"none", background:"none", fontSize:10, color:"#c00" }}>✕</button>
                   </div>
                 ))}
               </div>
             ))}
-          </div>}
+          </div>
 
           {view === "containers" && <div style={{ marginTop: 12, borderTop: "1px solid #ddd", paddingTop: 8 }}>
             <div onClick={() => setContainersExpanded(p => !p)} style={{ padding: "4px 8px", cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
@@ -146,32 +136,20 @@ export default function App() {
               </div>
             ))}
           </div>}
-
-          {view === "orders" && <div style={{ marginTop: 4 }}>
-            <div style={{ padding: "4px 8px", fontWeight: 600, fontSize: 13 }}>Orders ({orders.length})</div>
-            {orders.map(o => (
-              <div key={o.order_number} onClick={() => setSelectedOrder(selectedOrder === o.order_number ? null : o.order_number)}
-                style={{ padding: "3px 8px 3px 16px", cursor: "pointer", fontSize: 12, fontFamily: "monospace",
-                  background: selectedOrder === o.order_number ? "#dbeafe" : "transparent" }}>
-                {o.order_number}
-                <span style={{ color: "#999", fontSize: 10 }}> ({o.bag_count} bags)</span>
-              </div>
-            ))}
-          </div>}
         </div>
 
         <div style={{ flex: 1, overflow: "auto" }}>
-          {(view === "layers" || view === "bags" || (view === "orders" && selectedOrder)) && (
+          {(view === "layers" || view === "bags") && (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr style={{ background: "#f0f0f0", position: "sticky", top: 0 }}>
                 <th style={th}>Bag ID</th><th style={th}>LCSC Part</th><th style={th}>MFG Part</th><th style={th}>Qty</th>
-                <th style={th}>Order #</th><th style={th}>Container</th><th style={th}>Layer</th>
+                <th style={th}>Container</th><th style={th}>Layer</th><th style={th}></th>
               </tr></thead>
               <tbody>
                 {filteredBags.length === 0 && <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#999" }}>No components</td></tr>}
                 {filteredBags.map((b, i) => (
                   <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.package_bill_no || ""}>{b.package_bill_no ? b.package_bill_no.slice(0,16)+"…" : "—"}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.package_bill_no || ""}>{b.package_bill_no || "—"}</td>
                     <td style={{...td, fontFamily: "monospace", fontSize: 12}}>{b.lcsc_part_number}</td>
                     <td style={td}>{b.mfg_part_number || "—"}</td>
                     <td style={td} onDoubleClick={() => { setEditCell({row: b.bag_id, col: "qty"}); setEditVal(String(b.current_quantity)); }}>
@@ -181,28 +159,9 @@ export default function App() {
                           style={{ width: 60, border: "1px solid #3b82f6", borderRadius: 2, padding: "1px 4px", fontSize: 13 }} />
                       ) : <span style={{ fontWeight: 600, cursor: "pointer" }}>{b.current_quantity}</span>}
                     </td>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 11}}>{b.order_number || "—"}</td>
                     <td style={td}>{b.container_display_name}</td>
                     <td style={td}>{b.layer_name}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {view === "orders" && !selectedOrder && (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: "#f0f0f0", position: "sticky", top: 0 }}>
-                <th style={th}>Order #</th><th style={th}>Bags</th><th style={th}>Total Qty</th><th style={th}>First Scanned</th>
-              </tr></thead>
-              <tbody>
-                {orders.map((o, i) => (
-                  <tr key={o.order_number} onClick={() => setSelectedOrder(o.order_number)}
-                    style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9", cursor: "pointer" }}>
-                    <td style={{...td, fontFamily: "monospace", fontWeight: 600}}>{o.order_number}</td>
-                    <td style={td}>{o.bag_count}</td>
-                    <td style={td}>{o.total_qty}</td>
-                    <td style={td}>{o.first_scanned ? o.first_scanned.slice(0,10) : "—"}</td>
+                    <td style={td}><button onClick={() => deleteBag(b.bag_id)} style={{ cursor:"pointer", border:"none", background:"none", fontSize:13, color:"#c00" }}>✕</button></td>
                   </tr>
                 ))}
               </tbody>
