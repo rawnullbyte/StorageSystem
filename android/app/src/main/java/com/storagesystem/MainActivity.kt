@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import android.view.WindowManager
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,6 +44,11 @@ class MainActivity : ComponentActivity() {
 
         // Init runtime server config
         ServerSettings.init(this)
+
+        // Keep screen on while app is open
+        if (ServerSettings.keepScreenOn()) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
 
         // Request camera permission
         if (ContextCompat.checkSelfPermission(

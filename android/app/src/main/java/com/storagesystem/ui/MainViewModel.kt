@@ -44,7 +44,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _searchTerm.value = ""
             _searchResult.value = null
         }
-        seenQrs.clear()
         if (mode == ScanMode.ASSIGN_BAG) {
             loadContainers(_selectedLayerId.value)
         }
@@ -72,31 +71,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _detectedQrs = MutableStateFlow<List<DetectedQr>>(emptyList())
     val detectedQrs: StateFlow<List<DetectedQr>> = _detectedQrs.asStateFlow()
 
-    // Track which raw QR values we've seen (to avoid re-processing every frame)
-    private val seenQrs = mutableSetOf<String>()
-
     fun updateDetectedQrs(qrs: List<DetectedQr>) {
         _detectedQrs.value = qrs
-
-        // Auto-scan: automatically handle newly detected QRs without tapping
-        if (ServerSettings.autoScan()) {
-            val mode = _scanMode.value
-            for (qr in qrs) {
-                if (qr.rawValue in seenQrs) continue
-                seenQrs.add(qr.rawValue)
-                val parsed = parseQrCode(qr.rawValue)
-
-                if (mode == ScanMode.AUTO_IMPORT_CONTAINERS && parsed is QrParseResult.Container) {
-                    handleQrScan(parsed)
-                } else if (mode == ScanMode.ASSIGN_BAG && parsed is QrParseResult.LcscBag && parsed.lcscPartNumber.isNotBlank()) {
-                    // If container already selected, auto-assign
-                    val selContainer = _containers.value
-                    if (selContainer.size == 1) {
-                        assignBagToContainer(selContainer.first().id, parsed)
-                    }
-                }
-            }
-        }
     }
 
     // ─── Toast messages ─────────────────────────────────────────────
@@ -212,12 +188,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            val containerId = if (result.cid.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")))
-                result.cid
-            else
-                java.util.UUID.randomUUID().toString()
-
-            val displayName = result.cid.take(12)
+            // Use the cid directly — backend stores it as the container ID
+            val containerId = result.cid
+            val displayName = result.cid.take(20)
             repository.registerContainer(
                 displayName = displayName,
                 layerId = layerId,

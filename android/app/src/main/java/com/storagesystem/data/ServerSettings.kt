@@ -14,9 +14,12 @@ object ServerSettings {
     private const val KEY_API_BASE_URL = "api_base_url"
     private const val KEY_WS_URL = "ws_url"
     private const val KEY_AUTO_SCAN = "auto_scan"
+    private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
 
     fun autoScan(): Boolean = prefs()?.getBoolean(KEY_AUTO_SCAN, false) ?: false
     fun setAutoScan(enabled: Boolean) { prefs()?.edit()?.putBoolean(KEY_AUTO_SCAN, enabled)?.apply() }
+    fun keepScreenOn(): Boolean = prefs()?.getBoolean(KEY_KEEP_SCREEN_ON, true) ?: true
+    fun setKeepScreenOn(enabled: Boolean) { prefs()?.edit()?.putBoolean(KEY_KEEP_SCREEN_ON, enabled)?.apply() }
 
     private var prefs: SharedPreferences? = null
 

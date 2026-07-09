@@ -84,24 +84,34 @@ fun ScannerScreen(viewModel: MainViewModel) {
             }
             ScanMode.SEARCH -> {
                 if (searchPickContainer != null || searchPickPart != null) {
-                    // Camera mode: highlight matching QR
                     detectedQrs.map { qr ->
                         val cid = try { com.google.gson.Gson().fromJson(qr.rawValue, ContainerQrData::class.java)?.cid } catch (_: Exception) { null }
-                        val pc = try { val cleaned = qr.rawValue.trim().removeSurrounding("{","}"); val kvs = cleaned.split(",").associate { val p = it.trim().split("=", limit=2); p[0].trim() to p.getOrElse(1){""}.trim() }; kvs["pc"] } catch(_:Exception){null}
+                        val pc = try { val cleaned = qr.rawValue.trim().removeSurrounding("{","}"); val kvs = cleaned.split(",").associate { val p = it.trim().split("=",limit=2); p[0].trim() to p.getOrElse(1){""}.trim() }; kvs["pc"] } catch(_:Exception){null}
                         qr to when {
-                            searchPickContainer != null && (qr.qrType == QrType.CONTAINER && cid == searchPickContainer) -> OverlayColor.GREEN_MATCH
-                            searchPickPart != null && (qr.qrType == QrType.LCSC_BAG && pc == searchPickPart) -> OverlayColor.GREEN_MATCH
+                            searchPickContainer != null && cid == searchPickContainer -> OverlayColor.GREEN_MATCH
+                            searchPickPart != null && pc == searchPickPart -> OverlayColor.GREEN_MATCH
+                            searchPickContainer == null && searchPickPart == null && qr.qrType == QrType.CONTAINER -> OverlayColor.YELLOW
                             else -> OverlayColor.RED_NON_MATCH
                         }
                     }
-                } else emptyList()
+                } else detectedQrs.map { qr ->
+                    // No pick yet — highlight any container QR yellow (they'll all show)
+                    qr to if (qr.qrType == QrType.CONTAINER) OverlayColor.YELLOW else OverlayColor.RED_NON_MATCH
+                }
             }
         }
     }
 
+    // Track auto-scanned QRs to avoid re-processing every frame
+    val autoScanned = remember { mutableSetOf<String>() }
+
     // ── WebSocket indicator ─────────────────────────────────────────
     val wsConnected = remember { mutableStateOf(false) }
+    // Show connected on first WS event OR if we got data from the server
     LaunchedEffect(Unit) { viewModel.wsEvent.collect { wsConnected.value = true } }
+    LaunchedEffect(layers, containers) {
+        if (layers.isNotEmpty() || containers.isNotEmpty()) wsConnected.value = true
+    }
 
     // ── SEARCH INPUT VIEW ──────────────────────────────────────────
     if (scanMode == ScanMode.SEARCH && searchMode == "input") {
@@ -195,7 +205,25 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 CameraPreview(
                     overlayQrs = overlayQrs,
                     torchOn = torchOn,
-                    onQrsDetected = { viewModel.updateDetectedQrs(it) },
+                    onQrsDetected = { qrs ->
+                        viewModel.updateDetectedQrs(qrs)
+                        // Auto-scan: auto-register containers without tapping
+                        if (ServerSettings.autoScan() && selectedLayerId != null) {
+                            for (qr in qrs) {
+                                if (qr.rawValue in autoScanned) continue
+                                val parsed = viewModel.parseQrCode(qr.rawValue)
+                                if (scanMode == ScanMode.AUTO_IMPORT_CONTAINERS && parsed is QrParseResult.Container) {
+                                    autoScanned.add(qr.rawValue)
+                                    viewModel.handleQrScan(parsed)
+                                } else if (scanMode == ScanMode.ASSIGN_BAG && parsed is QrParseResult.LcscBag && parsed.lcscPartNumber.isNotBlank()) {
+                                    autoScanned.add(qr.rawValue)
+                                    if (containers.size == 1) {
+                                        viewModel.assignBagToContainer(containers.first().id, parsed)
+                                    }
+                                }
+                            }
+                        }
+                    },
                     onTapQr = { qr ->
                         val parsed = viewModel.parseQrCode(qr.rawValue)
                         when (scanMode) {
@@ -208,7 +236,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
                                 if (assignPhase == "select_container" && parsed is QrParseResult.Container) {
                                     val cid = parsed.cid
                                     var match = containers.find { it.id == cid }
-                                    if (match == null) match = containers.find { it.display_name == cid || cid.startsWith(it.display_name) || it.display_name.startsWith(cid.take(12)) }
+                                    if (match == null) match = containers.find { it.display_name == cid }
                                     if (match != null) { selectedContainer = match; assignPhase = "scan_bag"; viewModel.updateDetectedQrs(emptyList())
                                         coroutineScope.launch { snackbarHostState.showSnackbar("Selected ${match.display_name}") } }
                                     else { coroutineScope.launch { snackbarHostState.showSnackbar("Container not found on this layer") } }

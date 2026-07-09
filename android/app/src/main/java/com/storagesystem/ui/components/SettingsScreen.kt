@@ -15,6 +15,7 @@ import com.storagesystem.data.ServerSettings
 fun SettingsScreen(onDismiss: () -> Unit) {
     var serverUrl by remember { mutableStateOf(ServerSettings.apiBaseUrl) }
     var autoScan by remember { mutableStateOf(ServerSettings.autoScan()) }
+    var keepScreenOn by remember { mutableStateOf(ServerSettings.keepScreenOn()) }
 
     Scaffold(
         topBar = {
@@ -52,18 +53,23 @@ fun SettingsScreen(onDismiss: () -> Unit) {
             // Auto-scan toggle
             Text("Scanning", style = MaterialTheme.typography.titleSmall)
             Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.weight(1f)) {
                         Text("Auto-add containers & components", style = MaterialTheme.typography.bodyLarge)
                         Text("Auto-register on detection without tapping", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(checked = autoScan, onCheckedChange = {
-                        autoScan = it
-                        ServerSettings.setAutoScan(it)
-                    })
+                    Switch(checked = autoScan, onCheckedChange = { autoScan = it; ServerSettings.setAutoScan(it) })
+                }
+            }
+
+            // Always-on toggle
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Keep screen on", style = MaterialTheme.typography.bodyLarge)
+                        Text("Screen never dims while app is open", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = keepScreenOn, onCheckedChange = { keepScreenOn = it; ServerSettings.setKeepScreenOn(it) })
                 }
             }
         }
