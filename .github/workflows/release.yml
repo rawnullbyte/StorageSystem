@@ -99,6 +99,9 @@ jobs:
         run: |
           npm ci
           npm run build
+          # Force backend recompile by touching main.rs — rust-embed + cargo cache
+          # can otherwise serve stale embedded files from cache
+          touch ../backend/src/main.rs
         working-directory: dashboard
 
       - name: cargo build --release
