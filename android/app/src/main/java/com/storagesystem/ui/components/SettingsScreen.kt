@@ -47,7 +47,7 @@ fun SettingsScreen(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Save Server URL") }
 
-            HorizontalDivider()
+            Divider()
 
             // Auto-scan toggle
             Text("Scanning", style = MaterialTheme.typography.titleSmall)

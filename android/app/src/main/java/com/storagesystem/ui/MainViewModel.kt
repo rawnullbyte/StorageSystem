@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.storagesystem.data.models.*
 import com.storagesystem.data.repository.InventoryRepository
+import com.storagesystem.data.ServerSettings
 import com.storagesystem.data.repository.QrParseResult
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -179,13 +180,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
-    private fun handleContainerScan(result: QrParseResult.Container) {
-        val layerId = _selectedLayerId.value
-        if (layerId == null) {
-            viewModelScope.launch { _toastMessage.emit("Select a layer first") }
-            return
-        }
 
     private fun handleContainerScan(result: QrParseResult.Container) {
         val layerId = _selectedLayerId.value
