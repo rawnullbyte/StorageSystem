@@ -208,18 +208,36 @@ fun ScannerScreen(viewModel: MainViewModel) {
                     onQrsDetected = { qrs ->
                         viewModel.updateDetectedQrs(qrs)
                         // Auto-scan: auto-register containers without tapping
-                        if (ServerSettings.autoScan() && selectedLayerId != null) {
+                        // Auto-scan: auto-register containers without tapping
+                        if (ServerSettings.autoScan() && selectedLayerId != null && scanMode == ScanMode.AUTO_IMPORT_CONTAINERS) {
                             for (qr in qrs) {
                                 if (qr.rawValue in autoScanned) continue
                                 val parsed = viewModel.parseQrCode(qr.rawValue)
-                                if (scanMode == ScanMode.AUTO_IMPORT_CONTAINERS && parsed is QrParseResult.Container) {
+                                if (parsed is QrParseResult.Container) {
                                     autoScanned.add(qr.rawValue)
                                     viewModel.handleQrScan(parsed)
-                                } else if (scanMode == ScanMode.ASSIGN_BAG && parsed is QrParseResult.LcscBag && parsed.lcscPartNumber.isNotBlank()) {
-                                    autoScanned.add(qr.rawValue)
-                                    if (containers.size == 1) {
-                                        viewModel.assignBagToContainer(containers.first().id, parsed)
+                                }
+                            }
+                        }
+                        // Auto-scan for assign: auto-select container, then auto-assign
+                        if (ServerSettings.autoScan() && scanMode == ScanMode.ASSIGN_BAG) {
+                            for (qr in qrs) {
+                                if (qr.rawValue in autoScanned) continue
+                                val parsed = viewModel.parseQrCode(qr.rawValue)
+                                if (parsed is QrParseResult.Container && selectedContainer == null) {
+                                    // Auto-select first container we see
+                                    val cid = parsed.cid
+                                    val matchedContainer = containers.find { it.id == cid }
+                                        ?: containers.find { it.display_name == cid }
+                                    if (matchedContainer != null) {
+                                        autoScanned.add(qr.rawValue)
+                                        selectedContainer = matchedContainer
+                                        assignPhase = "scan_bag"
+                                        viewModel.updateDetectedQrs(emptyList())
                                     }
+                                } else if (parsed is QrParseResult.LcscBag && parsed.lcscPartNumber.isNotBlank() && selectedContainer != null) {
+                                    autoScanned.add(qr.rawValue)
+                                    viewModel.assignBagToContainer(selectedContainer!!.id, parsed)
                                 }
                             }
                         }
