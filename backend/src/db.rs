@@ -138,21 +138,41 @@ pub async fn add_bag(
     manufacturer_code: Option<&str>, carton_count: Option<&str>,
     packing_date: Option<&str>, warehouse_code: Option<&str>,
 ) -> Result<(bool, i32)> {
-    let result = sqlx::query_scalar::<_, Option<i32>>(
-        "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (container_id, lcsc_part_number) DO NOTHING
-         RETURNING current_quantity"
-    ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
-        .bind(order_number).bind(package_bill_no)
-        .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
-    .fetch_optional(pool).await?;
+    // If package_bill_no is provided, dedup by PBN (unique bag ID).
+    // If no PBN, always insert a new row (no dedup).
+    let result = if let Some(pbn) = package_bill_no {
+        sqlx::query_scalar::<_, Option<i32>>(
+            "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (package_bill_no) DO NOTHING
+             RETURNING current_quantity"
+        ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
+            .bind(order_number).bind(pbn)
+            .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
+        .fetch_optional(pool).await?
+    } else {
+        sqlx::query_scalar::<_, Option<i32>>(
+            "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING current_quantity"
+        ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
+            .bind(order_number).bind(package_bill_no)
+            .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
+        .fetch_optional(pool).await?
+    };
     match result {
         Some(Some(qty)) => Ok((true, qty)),
         _ => {
-            let existing = sqlx::query_scalar::<_, i32>(
-                "SELECT current_quantity FROM component_bags WHERE container_id = ? AND lcsc_part_number = ?"
-            ).bind(container_id).bind(lcsc_part_number).fetch_one(pool).await?;
+            // Already exists by PBN — fetch existing quantity
+            let existing = if let Some(pbn) = package_bill_no {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT current_quantity FROM component_bags WHERE package_bill_no = ?"
+                ).bind(pbn).fetch_one(pool).await?
+            } else {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT current_quantity FROM component_bags WHERE container_id = ? AND lcsc_part_number = ?"
+                ).bind(container_id).bind(lcsc_part_number).fetch_one(pool).await?
+            };
             Ok((false, existing))
         }
     }

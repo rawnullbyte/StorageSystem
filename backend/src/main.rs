@@ -94,6 +94,8 @@ async fn main() -> anyhow::Result<()> {
     sqlx::raw_sql(include_str!("../migrations/002_tags.sql")).execute(&pool).await?;
     // v3 is best-effort (ALTER TABLE may fail if columns already exist)
     let _ = sqlx::raw_sql(include_str!("../migrations/003_lcsc_fields_orders.sql")).execute(&pool).await;
+    // v4 is best-effort (table rename may fail if already applied)
+    let _ = sqlx::raw_sql(include_str!("../migrations/004_unique_pbn.sql")).execute(&pool).await;
     info!("Database schema up to date");
 
     let lcsc_key = std::env::var("LCSC_API_KEY").ok();
