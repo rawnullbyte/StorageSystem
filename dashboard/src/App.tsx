@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 interface Layer { id: number; name: string; description: string | null; }
 interface Container { id: string; display_name: string; storage_layer_id: number; updated_at: string | null; }
 interface Bag {
-  bag_id: number; container_id: string; lcsc_part_number: string;
+  bag_id: number; container_id: string; lcsc_part_number: string; order_number: string | null;
   initial_quantity: number; current_quantity: number;
   package_bill_no: string | null;
   description: string | null; manufacturer: string | null; package_type: string | null; datasheet_url: string | null;
@@ -149,7 +149,7 @@ export default function App() {
                 {filteredBags.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#999" }}>No components</td></tr>}
                 {filteredBags.map((b, i) => (
                   <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.package_bill_no || ""}>{b.package_bill_no || "—"}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.order_number || ""}>{b.order_number || b.package_bill_no || "—"}</td>
                     <td style={{...td, fontFamily: "monospace", fontSize: 12}}>{b.lcsc_part_number}</td>
                     <td style={td} onDoubleClick={() => { setEditCell({row: b.bag_id, col: "qty"}); setEditVal(String(b.current_quantity)); }}>
                       {editCell?.row === b.bag_id && editCell?.col === "qty" ? (
