@@ -36,7 +36,11 @@ data class AddBagRequest(
     val mfg_part_number: String,
     val quantity: Int,
     val order_number: String? = null,
-    val package_bill_no: String? = null
+    val package_bill_no: String? = null,
+    val manufacturer_code: String? = null,
+    val carton_count: String? = null,
+    val packing_date: String? = null,
+    val warehouse_code: String? = null
 )
 
 data class AddBagResponse(

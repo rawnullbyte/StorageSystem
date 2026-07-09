@@ -104,6 +104,10 @@ pub struct AddBagRequest {
     pub quantity: i32,
     pub order_number: Option<String>,
     pub package_bill_no: Option<String>,
+    pub manufacturer_code: Option<String>,
+    pub carton_count: Option<String>,
+    pub packing_date: Option<String>,
+    pub warehouse_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

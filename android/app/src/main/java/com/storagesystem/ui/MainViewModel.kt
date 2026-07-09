@@ -241,7 +241,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 mfg_part_number = bagData.mfgPartNumber,
                 quantity = bagData.quantity,
                 order_number = bagData.orderNumber,
-                package_bill_no = bagData.packageBillNo
+                package_bill_no = bagData.packageBillNo,
+                manufacturer_code = bagData.manufacturerCode,
+                carton_count = bagData.cartonCount,
+                packing_date = bagData.packingDate,
+                warehouse_code = bagData.warehouseCode
             )
 
             repository.assignBag(request).onSuccess { response ->

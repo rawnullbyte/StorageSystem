@@ -108,6 +108,10 @@ class InventoryRepository {
                     quantity = kvPairs["qty"]?.toIntOrNull() ?: 0,
                     orderNumber = kvPairs["on"],
                     packageBillNo = kvPairs["pbn"],
+                    manufacturerCode = kvPairs["mc"],
+                    cartonCount = kvPairs["cc"],
+                    packingDate = kvPairs["pdi"],
+                    warehouseCode = kvPairs["wc"],
                     raw = trimmed
                 )
             } catch (e: Exception) {
@@ -145,6 +149,10 @@ fun parseQrRaw(rawValue: String): QrParseResult {
                 quantity = kvPairs["qty"]?.toIntOrNull() ?: 0,
                 orderNumber = kvPairs["on"],
                 packageBillNo = kvPairs["pbn"],
+                manufacturerCode = kvPairs["mc"],
+                cartonCount = kvPairs["cc"],
+                packingDate = kvPairs["pdi"],
+                warehouseCode = kvPairs["wc"],
                 raw = trimmed
             )
         } catch (_: Exception) {}
@@ -165,6 +173,10 @@ sealed class QrParseResult {
         val quantity: Int,
         val orderNumber: String?,
         val packageBillNo: String?,
+        val manufacturerCode: String? = null,
+        val cartonCount: String? = null,
+        val packingDate: String? = null,
+        val warehouseCode: String? = null,
         val raw: String
     ) : QrParseResult()
 

@@ -86,7 +86,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 if (searchPickContainer != null || searchPickPart != null) {
                     detectedQrs.map { qr ->
                         val cid = try { com.google.gson.Gson().fromJson(qr.rawValue, ContainerQrData::class.java)?.cid } catch (_: Exception) { null }
-                        val pc = try { val cleaned = qr.rawValue.trim().removeSurrounding("{","}"); val kvs = cleaned.split(",").associate { val p = it.trim().split("=",limit=2); p[0].trim() to p.getOrElse(1){""}.trim() }; kvs["pc"] } catch(_:Exception){null}
+                        val pc = try { val cleaned = qr.rawValue.trim().removeSurrounding("{","}"); val kvs = cleaned.split(",").associate { val p = it.trim().split(":",limit=2); p[0].trim() to p.getOrElse(1){""}.trim() }; kvs["pc"] } catch(_:Exception){null}
                         qr to when {
                             searchPickContainer != null && cid == searchPickContainer -> OverlayColor.GREEN_MATCH
                             searchPickPart != null && pc == searchPickPart -> OverlayColor.GREEN_MATCH

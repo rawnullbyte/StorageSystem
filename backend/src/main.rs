@@ -92,6 +92,8 @@ async fn main() -> anyhow::Result<()> {
 
     sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await?;
     sqlx::raw_sql(include_str!("../migrations/002_tags.sql")).execute(&pool).await?;
+    // v3 is best-effort (ALTER TABLE may fail if columns already exist)
+    let _ = sqlx::raw_sql(include_str!("../migrations/003_lcsc_fields_orders.sql")).execute(&pool).await;
     info!("Database schema up to date");
 
     let lcsc_key = std::env::var("LCSC_API_KEY").ok();
@@ -101,16 +103,17 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(pool, lcsc_client);
 
     let app = Router::new()
-        .route("/api/layers", get(handlers::list_layers).post(handlers::create_layer))
+        .route("/api/layers", get(handlers::list_layers).post(handlers::create_layer).delete(handlers::delete_layer))
         .route("/api/containers", get(handlers::list_containers).post(handlers::create_container))
-        .route("/api/containers/{id}", patch(handlers::update_container))
+        .route("/api/containers/{id}", patch(handlers::update_container).delete(handlers::delete_container))
         .route("/api/containers/{id}/tags", get(handlers::get_container_tags).post(handlers::add_container_tag))
         .route("/api/containers/{id}/tags/{tag}", delete(handlers::remove_container_tag))
         .route("/api/components", get(handlers::list_bags).post(handlers::add_bag))
+        .route("/api/components/{bag_id}", delete(handlers::delete_bag))
         .route("/api/components/quantity", post(handlers::update_quantity))
-        // Pass bag_id as query param instead of path: /api/component-tags?bag_id=N
         .route("/api/component-tags", get(handlers::get_component_tags).post(handlers::add_component_tag))
         .route("/api/component-tags/{bag_id}/{tag}", delete(handlers::remove_component_tag))
+        .route("/api/orders", get(handlers::list_orders))
         .route("/api/search", post(handlers::search))
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::permissive())

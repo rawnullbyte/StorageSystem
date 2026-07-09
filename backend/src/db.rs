@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::models::*;
@@ -130,16 +131,21 @@ pub async fn upsert_part(
 
 // ── Component Bags ──────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn add_bag(
     pool: &SqlitePool, container_id: &str, lcsc_part_number: &str, quantity: i32,
     order_number: Option<&str>, package_bill_no: Option<&str>,
+    manufacturer_code: Option<&str>, carton_count: Option<&str>,
+    packing_date: Option<&str>, warehouse_code: Option<&str>,
 ) -> Result<(bool, i32)> {
     let result = sqlx::query_scalar::<_, Option<i32>>(
-        "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (container_id, lcsc_part_number) DO NOTHING
          RETURNING current_quantity"
-    ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity).bind(order_number).bind(package_bill_no)
+    ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
+        .bind(order_number).bind(package_bill_no)
+        .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
     .fetch_optional(pool).await?;
     match result {
         Some(Some(qty)) => Ok((true, qty)),
@@ -186,4 +192,40 @@ pub async fn search(pool: &SqlitePool, term: &str) -> Result<SearchResult> {
         "SELECT DISTINCT lcsc_part_number FROM component_bags WHERE lcsc_part_number LIKE ?"
     ).bind(&pattern).fetch_all(pool).await?;
     Ok(SearchResult { matched_containers: containers, matched_part_numbers: parts })
+}
+
+// ── Delete ──────────────────────────────────────────────────────────
+
+pub async fn delete_layer(pool: &SqlitePool, id: i32) -> Result<()> {
+    sqlx::query("DELETE FROM storage_layers WHERE id = ?").bind(id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn delete_container(pool: &SqlitePool, id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM containers WHERE id = ?").bind(id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn delete_bag(pool: &SqlitePool, bag_id: i32) -> Result<()> {
+    sqlx::query("DELETE FROM component_bags WHERE id = ?").bind(bag_id).execute(pool).await?;
+    Ok(())
+}
+
+// ── Orders ──────────────────────────────────────────────────────────
+
+#[derive(Debug, sqlx::FromRow, Serialize)]
+pub struct OrderSummary {
+    pub order_number: String,
+    pub bag_count: i32,
+    pub total_qty: i64,
+    pub first_scanned: Option<String>,
+}
+
+pub async fn list_orders(pool: &SqlitePool) -> Result<Vec<OrderSummary>> {
+    Ok(sqlx::query_as::<_, OrderSummary>(
+        "SELECT order_number, COUNT(*) as bag_count, SUM(current_quantity) as total_qty,
+                MIN(scanned_at) as first_scanned
+         FROM component_bags WHERE order_number IS NOT NULL AND order_number != ''
+         GROUP BY order_number ORDER BY first_scanned DESC"
+    ).fetch_all(pool).await?)
 }

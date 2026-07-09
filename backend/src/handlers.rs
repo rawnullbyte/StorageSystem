@@ -149,7 +149,9 @@ pub async fn add_bag(
         .await.map_err(internal_error)?;
 
     let (created, current_quantity) = db::add_bag(&state.db, &payload.container_id, &payload.lcsc_part_number,
-        payload.quantity, payload.order_number.as_deref(), payload.package_bill_no.as_deref())
+        payload.quantity, payload.order_number.as_deref(), payload.package_bill_no.as_deref(),
+        payload.manufacturer_code.as_deref(), payload.carton_count.as_deref(),
+        payload.packing_date.as_deref(), payload.warehouse_code.as_deref())
         .await.map_err(internal_error)?;
 
     if created {
@@ -184,4 +186,39 @@ pub async fn search(
 ) -> Result<Json<SearchResult>, (StatusCode, Json<serde_json::Value>)> {
     if payload.term.trim().is_empty() { return Ok(Json(SearchResult { matched_containers: vec![], matched_part_numbers: vec![] })); }
     db::search(&state.db, payload.term.trim()).await.map(Json).map_err(internal_error)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Delete
+// ═══════════════════════════════════════════════════════════════════
+
+pub async fn delete_layer(
+    State(state): State<AppState>, Path(id): Path<i32>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    db::delete_layer(&state.db, id).await.map_err(internal_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn delete_container(
+    State(state): State<AppState>, Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    db::delete_container(&state.db, &id).await.map_err(internal_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn delete_bag(
+    State(state): State<AppState>, Path(bag_id): Path<i32>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    db::delete_bag(&state.db, bag_id).await.map_err(internal_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Orders
+// ═══════════════════════════════════════════════════════════════════
+
+pub async fn list_orders(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<db::OrderSummary>>, (StatusCode, Json<serde_json::Value>)> {
+    db::list_orders(&state.db).await.map(Json).map_err(internal_error)
 }
