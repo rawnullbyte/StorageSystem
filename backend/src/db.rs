@@ -170,6 +170,7 @@ pub async fn list_bags(pool: &SqlitePool) -> Result<Vec<BagWithDetails>> {
         r#"
         SELECT b.id AS bag_id, b.container_id, b.lcsc_part_number, p.mfg_part_number,
                b.initial_quantity, b.current_quantity, b.order_number, b.package_bill_no,
+               b.manufacturer_code, b.carton_count, b.packing_date, b.warehouse_code,
                b.scanned_at, b.updated_at, p.description, p.manufacturer, p.package_type, p.datasheet_url,
                c.display_name AS container_display_name, l.name AS layer_name, l.id AS layer_id
         FROM component_bags b
