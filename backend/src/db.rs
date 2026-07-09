@@ -143,7 +143,7 @@ pub async fn add_bag(
         sqlx::query_scalar::<_, Option<i32>>(
             "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (package_bill_no) DO NOTHING
+             ON CONFLICT (order_number) DO NOTHING
              RETURNING current_quantity"
         ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
             .bind(order_number).bind(pbn)
@@ -166,7 +166,7 @@ pub async fn add_bag(
             // Conflict — fetch the actual stored quantity from existing bag
             let existing = match package_bill_no {
                 Some(pbn) => sqlx::query_scalar::<_, i32>(
-                    "SELECT current_quantity FROM component_bags WHERE package_bill_no = ?"
+                    "SELECT current_quantity FROM component_bags WHERE order_number = ?"
                 ).bind(pbn).fetch_optional(pool).await?.unwrap_or(quantity),
                 None => quantity,
             };
