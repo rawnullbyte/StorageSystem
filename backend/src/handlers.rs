@@ -167,14 +167,14 @@ pub async fn update_quantity(
     State(state): State<AppState>, Json(payload): Json<UpdateQuantityRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     if payload.quantity < 0 { return Err(bad_request("Quantity cannot be negative")); }
-    db::update_quantity(&state.db, &payload.container_id, &payload.lcsc_part_number, payload.quantity)
+    db::update_quantity(&state.db, payload.bag_id, payload.quantity)
         .await.map_err(|e| {
             if let Some(sqlx::Error::RowNotFound) = e.downcast_ref::<sqlx::Error>() {
                 (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Bag not found" })))
             } else { internal_error(e) }
         })?;
-    state.broadcast(&WsEvent::QuantityUpdated { container_id: payload.container_id.clone(), lcsc_part_number: payload.lcsc_part_number.clone(), new_quantity: payload.quantity });
-    Ok(Json(serde_json::json!({ "container_id": payload.container_id, "lcsc_part_number": payload.lcsc_part_number, "new_quantity": payload.quantity })))
+    state.broadcast(&WsEvent::QuantityUpdated { container_id: String::new(), lcsc_part_number: String::new(), new_quantity: payload.quantity });
+    Ok(Json(serde_json::json!({ "bag_id": payload.bag_id, "new_quantity": payload.quantity })))
 }
 
 // ═══════════════════════════════════════════════════════════════════

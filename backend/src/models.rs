@@ -116,8 +116,7 @@ pub struct AddBagRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateQuantityRequest {
-    pub container_id: String,
-    pub lcsc_part_number: String,
+    pub bag_id: i32,
     pub quantity: i32,
 }
 

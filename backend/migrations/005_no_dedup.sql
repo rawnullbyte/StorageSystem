@@ -1,7 +1,7 @@
--- StorageSystem v5: Remove all UNIQUE constraints on bags.
--- LCSC PICK batches can have multiple components with same PBN.
--- Same part can be in multiple containers.
--- Just always insert, never dedup.
+-- StorageSystem v5: Restore UNIQUE(package_bill_no) — PBNs are unique per bag.
+-- Remove old (container_id, lcsc_part_number) constraint which prevented
+-- the same part number in multiple containers.
+-- Use bag_id (primary key) instead of (container_id, part) for updates.
 
 ALTER TABLE component_bags RENAME TO component_bags_old;
 
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS component_bags (
     initial_quantity INTEGER NOT NULL CHECK (initial_quantity >= 0),
     current_quantity INTEGER NOT NULL CHECK (current_quantity >= 0),
     order_number TEXT,
-    package_bill_no TEXT,
+    package_bill_no TEXT UNIQUE,
     manufacturer_code TEXT,
     carton_count TEXT,
     packing_date TEXT,

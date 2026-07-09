@@ -67,7 +67,7 @@ export default function App() {
 
   async function saveEdit(b: Bag) {
     if (editCell?.col === "qty") {
-      await api("/api/components/quantity", { method: "POST", body: JSON.stringify({ container_id: b.container_id, lcsc_part_number: b.lcsc_part_number, quantity: parseInt(editVal) }) }).catch(console.error);
+      await api("/api/components/quantity", { method: "POST", body: JSON.stringify({ bag_id: b.bag_id, quantity: parseInt(editVal) }) }).catch(console.error);
     }
     setEditCell(null); load();
   }
