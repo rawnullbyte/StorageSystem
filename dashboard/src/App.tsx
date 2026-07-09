@@ -184,7 +184,9 @@ export default function App() {
                 {sortedBags.map((b, i) => (
                   <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
                     <td style={{...td, fontFamily: "monospace", fontSize: 10, color: "#666" }}>{b.bag_id}</td>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 12}}>{b.lcsc_part_number}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 12}}>
+                      <a href={`https://www.lcsc.com/product-detail/${b.lcsc_part_number}.html`} target="_blank" rel="noopener" style={{ color: "#2563eb", textDecoration: "none" }}>{b.lcsc_part_number}</a>
+                    </td>
                     <td style={{...td, fontFamily: "monospace", fontSize: 11, color: "#666"}}>{b.mfg_part_number || "—"}</td>
                     <td style={td} onDoubleClick={() => { setEditCell({row: b.bag_id, col: "qty"}); setEditVal(String(b.current_quantity)); }}>
                       {editCell?.row === b.bag_id && editCell?.col === "qty" ? (
