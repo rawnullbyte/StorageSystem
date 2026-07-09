@@ -203,9 +203,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     current.add(registered)
                     _containers.value = current
                     _toastMessage.emit("Container registered: ${registered.display_name}")
-                } else {
-                    Log.i(TAG, "Container $containerId already exists on layer $layerId")
-                    if (!ServerSettings.autoScan()) _toastMessage.emit("Already registered: ${registered.display_name}")
                 }
                 loadContainers(layerId)
             }.onFailure { e ->
