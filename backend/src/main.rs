@@ -90,12 +90,14 @@ async fn main() -> anyhow::Result<()> {
     sqlx::raw_sql("PRAGMA busy_timeout=5000").execute(&pool).await?;
     sqlx::raw_sql("PRAGMA foreign_keys=ON").execute(&pool).await?;
 
+    // Schema with UNIQUE(package_bill_no)
     sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await?;
-    sqlx::raw_sql(include_str!("../migrations/002_tags.sql")).execute(&pool).await?;
-    // v3-5 are best-effort (ALTER TABLE / rename may fail if already applied)
-    let _ = sqlx::raw_sql(include_str!("../migrations/003_lcsc_fields_orders.sql")).execute(&pool).await;
-    let _ = sqlx::raw_sql(include_str!("../migrations/004_unique_pbn.sql")).execute(&pool).await;
-    let _ = sqlx::raw_sql(include_str!("../migrations/005_no_dedup.sql")).execute(&pool).await;
+    // Best-effort: drop old constraint-based rows, keep data, recreate
+    let _ = sqlx::raw_sql("DROP TABLE IF EXISTS component_bags_old").execute(&pool).await;
+    let _ = sqlx::raw_sql("ALTER TABLE component_bags RENAME TO component_bags_old").execute(&pool).await;
+    let _ = sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await;
+    let _ = sqlx::raw_sql("INSERT OR IGNORE INTO component_bags (id, container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, scanned_at, updated_at) SELECT id, container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, scanned_at, updated_at FROM component_bags_old").execute(&pool).await;
+    let _ = sqlx::raw_sql("DROP TABLE IF EXISTS component_bags_old").execute(&pool).await;
     info!("Database schema up to date");
 
     let lcsc_key = std::env::var("LCSC_API_KEY").ok();

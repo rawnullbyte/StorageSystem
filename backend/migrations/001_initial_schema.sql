@@ -1,6 +1,4 @@
--- StorageSystem: Initial Database Schema (SQLite dialect)
--- UUIDs are generated in Rust via Uuid::new_v4().
--- Timestamps stored as TEXT in ISO 8601 format.
+-- StorageSystem: Final Schema (all migrations merged into one)
 
 CREATE TABLE IF NOT EXISTS storage_layers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,11 +35,32 @@ CREATE TABLE IF NOT EXISTS component_bags (
     initial_quantity INTEGER NOT NULL CHECK (initial_quantity >= 0),
     current_quantity INTEGER NOT NULL CHECK (current_quantity >= 0),
     order_number TEXT,
-    package_bill_no TEXT,
+    package_bill_no TEXT UNIQUE,
+    manufacturer_code TEXT,
+    carton_count TEXT,
+    packing_date TEXT,
+    warehouse_code TEXT,
     scanned_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    CONSTRAINT unique_bag_in_container UNIQUE (container_id, lcsc_part_number)
+    updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_bags_container ON component_bags(container_id);
 CREATE INDEX IF NOT EXISTS idx_bags_part ON component_bags(lcsc_part_number);
+CREATE INDEX IF NOT EXISTS idx_bags_order ON component_bags(order_number);
+
+-- Tags
+CREATE TABLE IF NOT EXISTS container_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    container_id TEXT NOT NULL REFERENCES containers(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL COLLATE NOCASE,
+    UNIQUE(container_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_container_tags_tag ON container_tags(tag);
+
+CREATE TABLE IF NOT EXISTS component_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bag_id INTEGER NOT NULL REFERENCES component_bags(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL COLLATE NOCASE,
+    UNIQUE(bag_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_component_tags_tag ON component_tags(tag);

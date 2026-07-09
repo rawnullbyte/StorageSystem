@@ -148,8 +148,10 @@ pub async fn add_bag(
         part_info.package_type.as_deref(), part_info.datasheet_url.as_deref())
         .await.map_err(internal_error)?;
 
+    // Treat empty PBN as None — empty strings conflict with each other in UNIQUE constraint
+    let pbn = payload.package_bill_no.as_deref().filter(|s| !s.is_empty());
     let (created, current_quantity) = db::add_bag(&state.db, &payload.container_id, &payload.lcsc_part_number,
-        payload.quantity, payload.order_number.as_deref(), payload.package_bill_no.as_deref(),
+        payload.quantity, payload.order_number.as_deref(), pbn,
         payload.manufacturer_code.as_deref(), payload.carton_count.as_deref(),
         payload.packing_date.as_deref(), payload.warehouse_code.as_deref())
         .await.map_err(internal_error)?;

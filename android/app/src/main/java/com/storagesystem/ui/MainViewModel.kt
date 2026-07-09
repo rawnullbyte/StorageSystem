@@ -230,7 +230,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         containerId: String,
         bagData: QrParseResult.LcscBag
     ) {
-        Log.i(TAG, "assignBag: container=$containerId part=${bagData.lcscPartNumber} qty=${bagData.quantity}")
+        Log.i(TAG, "assignBag: container=$containerId part=${bagData.lcscPartNumber} qty=${bagData.quantity} pbn=${bagData.packageBillNo ?: "?"}")
         viewModelScope.launch {
             val request = AddBagRequest(
                 container_id = containerId,
