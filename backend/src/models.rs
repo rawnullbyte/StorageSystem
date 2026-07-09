@@ -29,6 +29,7 @@ pub struct BagWithDetails {
     pub container_id: String,
     pub lcsc_part_number: String,
     pub mfg_part_number: String,
+    pub raw_qr: Option<String>,
     pub initial_quantity: i32,
     pub current_quantity: i32,
     pub order_number: Option<String>,
@@ -112,6 +113,7 @@ pub struct AddBagRequest {
     pub carton_count: Option<String>,
     pub packing_date: Option<String>,
     pub warehouse_code: Option<String>,
+    pub raw_qr: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

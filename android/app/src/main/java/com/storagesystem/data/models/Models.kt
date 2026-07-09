@@ -40,7 +40,8 @@ data class AddBagRequest(
     val manufacturer_code: String? = null,
     val carton_count: String? = null,
     val packing_date: String? = null,
-    val warehouse_code: String? = null
+    val warehouse_code: String? = null,
+    val raw_qr: String? = null
 )
 
 data class AddBagResponse(

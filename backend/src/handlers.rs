@@ -153,7 +153,8 @@ pub async fn add_bag(
     let (created, current_quantity) = db::add_bag(&state.db, &payload.container_id, &payload.lcsc_part_number,
         payload.quantity, payload.order_number.as_deref(), pbn,
         payload.manufacturer_code.as_deref(), payload.carton_count.as_deref(),
-        payload.packing_date.as_deref(), payload.warehouse_code.as_deref())
+        payload.packing_date.as_deref(), payload.warehouse_code.as_deref(),
+        payload.raw_qr.as_deref())
         .await.map_err(internal_error)?;
 
     if created {

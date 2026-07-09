@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS component_bags (
     carton_count TEXT,
     packing_date TEXT,
     warehouse_code TEXT,
+    raw_qr TEXT UNIQUE,
     scanned_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

@@ -137,17 +137,36 @@ pub async fn add_bag(
     order_number: Option<&str>, package_bill_no: Option<&str>,
     manufacturer_code: Option<&str>, carton_count: Option<&str>,
     packing_date: Option<&str>, warehouse_code: Option<&str>,
+    raw_qr: Option<&str>,
 ) -> Result<(bool, i32)> {
-    // Always insert — every bag scan creates a new row.
-    // No field across LCSC bag QR codes is guaranteed unique.
-    sqlx::query(
-        "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
-        .bind(order_number).bind(package_bill_no)
-        .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
-    .execute(pool).await?;
-    Ok((true, quantity))
+    // Dedup by raw_qr (SHA-256 hashed) — the entire QR code text is unique per bag.
+    // If raw_qr is provided, ON CONFLICT returns existing qty.
+    let result = if let Some(rq) = raw_qr {
+        sqlx::query_scalar::<_, Option<i32>>(
+            "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code, raw_qr)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (raw_qr) DO NOTHING
+             RETURNING current_quantity"
+        ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
+            .bind(order_number).bind(package_bill_no)
+            .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
+            .bind(rq)
+        .fetch_optional(pool).await?
+    } else {
+        // No raw_qr — always insert
+        sqlx::query_scalar::<_, Option<i32>>(
+            "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING current_quantity"
+        ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
+            .bind(order_number).bind(package_bill_no)
+            .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
+        .fetch_optional(pool).await?
+    };
+    match result {
+        Some(Some(qty)) => Ok((true, qty)),
+        _ => Ok((false, quantity)),
+    }
 }
 
 pub async fn update_quantity(pool: &SqlitePool, bag_id: i32, new_quantity: i32) -> Result<i32> {
@@ -162,7 +181,7 @@ pub async fn list_bags(pool: &SqlitePool) -> Result<Vec<BagWithDetails>> {
         r#"
         SELECT b.id AS bag_id, b.container_id, b.lcsc_part_number, p.mfg_part_number,
                b.initial_quantity, b.current_quantity, b.order_number, b.package_bill_no,
-               b.manufacturer_code, b.carton_count, b.packing_date, b.warehouse_code,
+               b.manufacturer_code, b.carton_count, b.packing_date, b.warehouse_code, b.raw_qr,
                b.scanned_at, b.updated_at, p.description, p.manufacturer, p.package_type, p.datasheet_url,
                c.display_name AS container_display_name, l.name AS layer_name, l.id AS layer_id
         FROM component_bags b
