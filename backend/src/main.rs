@@ -90,14 +90,19 @@ async fn main() -> anyhow::Result<()> {
     sqlx::raw_sql("PRAGMA busy_timeout=5000").execute(&pool).await?;
     sqlx::raw_sql("PRAGMA foreign_keys=ON").execute(&pool).await?;
 
-    // Schema with UNIQUE(package_bill_no)
-    sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await?;
-    // Best-effort: drop old constraint-based rows, keep data, recreate
-    let _ = sqlx::raw_sql("DROP TABLE IF EXISTS component_bags_old").execute(&pool).await;
-    let _ = sqlx::raw_sql("ALTER TABLE component_bags RENAME TO component_bags_old").execute(&pool).await;
-    let _ = sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await;
-    let _ = sqlx::raw_sql("INSERT OR IGNORE INTO component_bags (id, container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, scanned_at, updated_at) SELECT id, container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, scanned_at, updated_at FROM component_bags_old").execute(&pool).await;
-    let _ = sqlx::raw_sql("DROP TABLE IF EXISTS component_bags_old").execute(&pool).await;
+    // Try to migrate old DBs: rename old table, create clean one, copy data
+    // On fresh DBs the ALTER TABLE will fail silently (no old table to rename)
+    let _ = sqlx::raw_sql("PRAGMA foreign_keys=OFF").execute(&pool).await;
+    if sqlx::raw_sql("ALTER TABLE component_bags RENAME TO component_bags_old").execute(&pool).await.is_ok() {
+        // Old table existed — recreate without stale constraints
+        sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await?;
+        let _ = sqlx::raw_sql("INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code, scanned_at, updated_at) SELECT container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, NULL, NULL, NULL, NULL, scanned_at, updated_at FROM component_bags_old").execute(&pool).await;
+        let _ = sqlx::raw_sql("DROP TABLE IF EXISTS component_bags_old").execute(&pool).await;
+    } else {
+        // Fresh DB — just create schema
+        sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql")).execute(&pool).await?;
+    }
+    let _ = sqlx::raw_sql("PRAGMA foreign_keys=ON").execute(&pool).await;
     info!("Database schema up to date");
 
     let lcsc_key = std::env::var("LCSC_API_KEY").ok();

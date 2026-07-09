@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS component_bags (
     lcsc_part_number TEXT NOT NULL REFERENCES lcsc_parts(lcsc_part_number),
     initial_quantity INTEGER NOT NULL CHECK (initial_quantity >= 0),
     current_quantity INTEGER NOT NULL CHECK (current_quantity >= 0),
-    order_number TEXT UNIQUE,
+    order_number TEXT,
     package_bill_no TEXT,
     manufacturer_code TEXT,
     carton_count TEXT,

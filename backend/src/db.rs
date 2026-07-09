@@ -138,41 +138,16 @@ pub async fn add_bag(
     manufacturer_code: Option<&str>, carton_count: Option<&str>,
     packing_date: Option<&str>, warehouse_code: Option<&str>,
 ) -> Result<(bool, i32)> {
-    // Dedup by PBN (package_bill_no) — each bag has a unique PICK number
-    let result = if let Some(pbn) = package_bill_no {
-        sqlx::query_scalar::<_, Option<i32>>(
-            "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (order_number) DO NOTHING
-             RETURNING current_quantity"
-        ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
-            .bind(order_number).bind(pbn)
-            .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
-        .fetch_optional(pool).await?
-    } else {
-        // No PBN — always insert
-        sqlx::query_scalar::<_, Option<i32>>(
-            "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             RETURNING current_quantity"
-        ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
-            .bind(order_number).bind(package_bill_no)
-            .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
-        .fetch_optional(pool).await?
-    };
-    match result {
-        Some(Some(qty)) => Ok((true, qty)),
-        _ => {
-            // Conflict — fetch the actual stored quantity from existing bag
-            let existing = match package_bill_no {
-                Some(pbn) => sqlx::query_scalar::<_, i32>(
-                    "SELECT current_quantity FROM component_bags WHERE order_number = ?"
-                ).bind(pbn).fetch_optional(pool).await?.unwrap_or(quantity),
-                None => quantity,
-            };
-            Ok((false, existing))
-        }
-    }
+    // Always insert — every bag scan creates a new row.
+    // No field across LCSC bag QR codes is guaranteed unique.
+    sqlx::query(
+        "INSERT INTO component_bags (container_id, lcsc_part_number, initial_quantity, current_quantity, order_number, package_bill_no, manufacturer_code, carton_count, packing_date, warehouse_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(container_id).bind(lcsc_part_number).bind(quantity).bind(quantity)
+        .bind(order_number).bind(package_bill_no)
+        .bind(manufacturer_code).bind(carton_count).bind(packing_date).bind(warehouse_code)
+    .execute(pool).await?;
+    Ok((true, quantity))
 }
 
 pub async fn update_quantity(pool: &SqlitePool, bag_id: i32, new_quantity: i32) -> Result<i32> {
