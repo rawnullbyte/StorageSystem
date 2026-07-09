@@ -150,6 +150,7 @@ export default function App() {
                 {filteredBags.map((b, i) => (
                   <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
                     <td style={{...td, fontFamily: "monospace", fontSize: 11}} title={b.package_bill_no || ""}>{b.package_bill_no || "—"}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 12}}>{b.lcsc_part_number}</td>
                     <td style={td} onDoubleClick={() => { setEditCell({row: b.bag_id, col: "qty"}); setEditVal(String(b.current_quantity)); }}>
                       {editCell?.row === b.bag_id && editCell?.col === "qty" ? (
                         <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
