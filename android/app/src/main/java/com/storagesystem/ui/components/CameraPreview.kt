@@ -3,6 +3,7 @@ package com.storagesystem.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import androidx.camera.core.CameraSelector
@@ -28,6 +29,9 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE
+import com.google.mlkit.vision.objects.ObjectDetection
+import com.google.mlkit.vision.objects.DetectedObject
+import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import com.storagesystem.data.models.DetectedQr
 import com.storagesystem.data.models.OverlayColor
 import com.storagesystem.data.models.QrType
@@ -35,62 +39,22 @@ import com.storagesystem.data.repository.parseQrRaw
 import com.storagesystem.data.repository.QrParseResult
 import kotlin.math.sqrt
 
-private const val MAX_HISTORY = 12
-private const val MAX_PREDICTION_MS = 2500L
-private const val CONFIDENT_MS = 150L
+private const val TAG = "CameraPreview"
 
 /**
- * Tracks a QR code's position using velocity from recent detection history.
- * Once the QR is decoded once, we can predict where it is even when blurry
- * by extrapolating its movement. Tracking is lost after 2.5s of no detections.
+ * Tracks a QR region across frames using ML Kit's built-in trackingId.
+ * Once decoded, the object detector visually follows the region even when
+ * the QR is blurry — updating the bounding box based on visual features
+ * (corners, edges, contrast), not by re-reading the QR code.
  */
-private class QrPrediction(val rawValue: String, val qrType: QrType) {
-    private val history = mutableListOf<Pair<Rect, Long>>()
-
-    fun addPosition(box: Rect, timeMs: Long) {
-        history.add(box to timeMs)
-        while (history.size > MAX_HISTORY) history.removeAt(0)
-    }
-
-    /** Returns predicted position, or null if tracking is lost. */
-    fun predict(currentMs: Long): Rect? {
-        if (history.isEmpty()) return null
-        val latest = history.last()
-        val elapsed = currentMs - latest.second
-
-        // Lost tracking if too long since last detection
-        if (elapsed > MAX_PREDICTION_MS) return null
-
-        // Fresh detection — use exact position
-        if (elapsed < CONFIDENT_MS) return latest.first
-
-        // Need at least 2 points for velocity
-        if (history.size < 2) return latest.first
-
-        // Average velocity from last 5 detections
-        val recent = history.takeLast(5)
-        var dx = 0f; var dy = 0f; var dt = 0f
-        for (i in 1 until recent.size) {
-            val t = (recent[i].second - recent[i - 1].second).toFloat()
-            if (t > 0) {
-                dx += recent[i].first.centerX() - recent[i - 1].first.centerX()
-                dy += recent[i].first.centerY() - recent[i - 1].first.centerY()
-                dt += t
-            }
-        }
-        if (dt < 10f) return latest.first
-
-        val vx = dx / dt; val vy = dy / dt
-        val w = latest.first.width(); val h = latest.first.height()
-
-        return Rect(
-            (latest.first.left + vx * elapsed).toInt(),
-            (latest.first.top + vy * elapsed).toInt(),
-            (latest.first.left + vx * elapsed + w).toInt(),
-            (latest.first.top + vy * elapsed + h).toInt()
-        )
-    }
-}
+private data class TrackedQr(
+    var rawValue: String?,
+    var boundingBox: Rect,
+    var qrType: QrType,
+    val trackingId: Int,
+    var isFromBarcode: Boolean,
+    val scannedData: QrParseResult? = null
+)
 
 @Composable
 fun CameraPreview(
@@ -106,10 +70,10 @@ fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
 
-    // Tracked predictions — persist across frames, survive blurry frames
-    val predictions = remember { mutableStateMapOf<String, QrPrediction>() }
-    // Full overlay list (real + predicted) for tap detection
-    val overlayListState = remember { mutableStateListOf<DetectedQr>() }
+    // trackingId -> TrackedQr — persists across frames
+    val tracked = remember { mutableStateMapOf<Int, TrackedQr>() }
+    // Full overlay for tap detection
+    val overlayState = remember { mutableStateListOf<DetectedQr>() }
 
     LaunchedEffect(torchOn, controllerRef.value) {
         val ctrl = controllerRef.value ?: return@LaunchedEffect
@@ -117,8 +81,8 @@ fun CameraPreview(
     }
 
     LaunchedEffect(trackingResetSignal) {
-        predictions.clear()
-        overlayListState.clear()
+        tracked.clear()
+        overlayState.clear()
     }
 
     val hasCameraPermission = remember {
@@ -139,65 +103,107 @@ fun CameraPreview(
                 controllerRef.value = controller
                 pv.controller = controller
 
-                val scanner = BarcodeScanning.getClient(
+                // ── Barcode scanner (decodes QR content) ────────────────────
+                val barcodeScanner = BarcodeScanning.getClient(
                     com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
                         .setBarcodeFormats(FORMAT_QR_CODE)
+                        .build()
+                )
+
+                // ── Object detector (tracks visual region) ──────────────────
+                val objectDetector = ObjectDetection.getClient(
+                    ObjectDetectorOptions.Builder()
+                        .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+                        .enableMultipleObjects()
                         .build()
                 )
 
                 controller.setImageAnalysisAnalyzer(
                     ContextCompat.getMainExecutor(ctx),
                     MlKitAnalyzer(
-                        listOf(scanner),
+                        listOf(barcodeScanner, objectDetector),
                         CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED,
                         ContextCompat.getMainExecutor(ctx)
                     ) { result: MlKitAnalyzer.Result? ->
-                        val now = System.currentTimeMillis()
-                        val barcodes: List<Barcode>? = result?.getValue(scanner) as? List<Barcode>
+                        val barcodes: List<Barcode>? = result?.getValue(barcodeScanner) as? List<Barcode>
+                        val objects: List<DetectedObject>? = result?.getValue(objectDetector) as? List<DetectedObject>
 
-                        // Real detections this frame
-                        val newDetections = (barcodes ?: emptyList()).mapNotNull { b ->
-                            val raw = b.rawValue ?: return@mapNotNull null
-                            DetectedQr(raw, b.boundingBox ?: Rect(0,0,0,0), classifyQr(raw))
-                        }
-
-                        val detectedKeys = newDetections.map { it.rawValue }.toSet()
-
-                        // Update prediction history with real detections
-                        for (qr in newDetections) {
-                            if (qr.boundingBox.isEmpty) continue
-                            val pred = predictions.getOrPut(qr.rawValue) {
-                                QrPrediction(qr.rawValue, qr.qrType)
-                            }
-                            pred.addPosition(qr.boundingBox, now)
-                        }
-
-                        // Build overlay: real detections + predicted positions
-                        val overlay = mutableListOf<DetectedQr>()
-                        overlay.addAll(newDetections)
-
-                        val toRemove = mutableListOf<String>()
-                        for ((raw, pred) in predictions) {
-                            if (raw in detectedKeys) continue
-                            val predictedBox = pred.predict(now)
-                            if (predictedBox != null) {
-                                overlay.add(DetectedQr(raw, predictedBox, pred.qrType))
+                        // ── Step 1: Process object detector (visual tracking) ──
+                        // This runs EVERY frame and gives us boxes even when QR is blurry
+                        for (obj in objects.orEmpty()) {
+                            val tid = obj.trackingId ?: continue
+                            val existing = tracked[tid]
+                            if (existing != null) {
+                                // Update bounding box visually — no decoding needed
+                                existing.boundingBox = obj.boundingBox
+                                existing.isFromBarcode = false
                             } else {
-                                toRemove.add(raw)
+                                // New visual object, no decoded data yet
+                                tracked[tid] = TrackedQr(
+                                    rawValue = null,
+                                    boundingBox = obj.boundingBox,
+                                    qrType = QrType.UNKNOWN,
+                                    trackingId = tid,
+                                    isFromBarcode = false
+                                )
                             }
                         }
-                        for (key in toRemove) predictions.remove(key)
 
-                        overlayListState.clear()
-                        overlayListState.addAll(overlay)
-                        onQrsDetected(newDetections)
+                        // ── Step 2: Process barcode results (decoding) ────────
+                        // Associates decoded data with the nearest tracked object
+                        for (barcode in barcodes.orEmpty()) {
+                            val raw = barcode.rawValue ?: continue
+                            val box = barcode.boundingBox ?: continue
+                            val type = classifyQr(raw)
+                            val parsed = parseQrRaw(raw)
+
+                            // Find the object detector's tracked region that overlaps
+                            val matched = objects.orEmpty().minByOrNull { obj ->
+                                val ob = obj.boundingBox
+                                val cx1 = box.centerX().toFloat()
+                                val cy1 = box.centerY().toFloat()
+                                val cx2 = ob.centerX().toFloat()
+                                val cy2 = ob.centerY().toFloat()
+                                sqrt((cx1 - cx2) * (cx1 - cx2) + (cy1 - cy2) * (cy1 - cy2))
+                            }
+                            val tid = matched?.trackingId ?: (raw.hashCode() % 10000)
+
+                            // Associate decoded data with this tracked region
+                            tracked[tid] = TrackedQr(
+                                rawValue = raw,
+                                boundingBox = box,
+                                qrType = type,
+                                trackingId = tid,
+                                isFromBarcode = true,
+                                scannedData = parsed
+                            )
+                        }
+
+                        // ── Step 3: Remove lost tracks ────────────────────────
+                        val activeIds = (objects.orEmpty().mapNotNull { it.trackingId } +
+                                barcodes.orEmpty().map { it.rawValue.hashCode() % 10000 }).toSet()
+                        tracked.keys.removeIf { it !in activeIds }
+
+                        // ── Step 4: Build output ──────────────────────────────
+                        val freshDetections = tracked.values
+                            .filter { it.isFromBarcode && it.rawValue != null }
+                            .map { DetectedQr(it.rawValue!!, it.boundingBox, it.qrType) }
+
+                        // Full overlay for drawing + tapping
+                        val overlay = tracked.values
+                            .filter { it.rawValue != null && it.boundingBox.width() > 0 }
+                            .map { DetectedQr(it.rawValue!!, it.boundingBox, it.qrType) }
+
+                        overlayState.clear()
+                        overlayState.addAll(overlay)
+                        onQrsDetected(freshDetections)
                     }
                 )
 
                 pv.setOnTouchListener { _: View, event: MotionEvent ->
                     if (event.action == MotionEvent.ACTION_UP) {
                         val tx = event.x; val ty = event.y
-                        val tapped = overlayListState.minByOrNull { qr ->
+                        val tapped = overlayState.minByOrNull { qr ->
                             val r = qr.boundingBox
                             val cx = (r.left + r.right) / 2f; val cy = (r.top + r.bottom) / 2f
                             sqrt((tx - cx) * (tx - cx) + (ty - cy) * (ty - cy))
@@ -211,17 +217,19 @@ fun CameraPreview(
         )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val now = System.currentTimeMillis()
             val overlayKeys = overlayQrs.map { it.first.rawValue }.toSet()
-
-            // Start with state-provided overlay QRs
             val combined = overlayQrs.toMutableList()
 
-            // Add predicted (tracked but not decoded this frame) as green
-            for ((raw, pred) in predictions) {
-                if (raw in overlayKeys) continue
-                val predictedBox = pred.predict(now) ?: continue
-                combined.add(DetectedQr(raw, predictedBox, pred.qrType) to OverlayColor.GREEN)
+            // Add tracked visual-only objects (decoded earlier, tracking visually)
+            for (entry in tracked) {
+                val t = entry.value
+                if (t.rawValue == null) continue
+                if (t.rawValue in overlayKeys) continue
+                if (t.boundingBox.width() <= 0) continue
+                combined.add(
+                    DetectedQr(t.rawValue!!, t.boundingBox, t.qrType) to
+                            if (t.isFromBarcode) OverlayColor.BLUE else OverlayColor.GREEN
+                )
             }
 
             for ((qr, color) in combined) {
