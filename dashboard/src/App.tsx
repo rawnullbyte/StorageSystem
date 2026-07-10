@@ -7,7 +7,7 @@ interface Bag {
   initial_quantity: number; current_quantity: number; order_number: string | null;
   package_bill_no: string | null; manufacturer_code: string | null; carton_count: string | null;
   packing_date: string | null; warehouse_code: string | null;
-  scanned_at: string | null; description: string | null; manufacturer: string | null;
+  scanned_at: string | null; updated_at: string | null; description: string | null; manufacturer: string | null;
   package_type: string | null; datasheet_url: string | null;
   container_display_name: string; layer_name: string; layer_id: number;
 }
@@ -239,19 +239,31 @@ export default function App() {
             {selectedBag && <span className="ml-4">• selected: <strong className="text-text-secondary">{selectedBag.lcsc_part_number}</strong></span>}
           </div>
 
-          {/* LCSC detail panel */}
+          {/* Bag detail panel (flexible height) */}
           {selectedBag && (
-            <div style={{ height: 300, borderTop: "1px solid var(--color-surface-300)", background: "var(--color-surface-950)", display: "flex", flexDirection: "column" }}>
-              <div className="flex items-center gap-2 px-3 py-1 text-[12px] border-b" style={{ background: "var(--color-surface-700)", borderColor: "var(--color-surface-300)" }}>
+            <div className="flex-shrink-0 border-t" style={{ borderColor: "var(--color-surface-300)", background: "var(--color-surface-950)", maxHeight: "40vh" }}>
+              <div className="flex items-center gap-2 px-3 py-2 text-[12px] border-b" style={{ background: "var(--color-surface-700)", borderColor: "var(--color-surface-300)" }}>
                 <strong style={{ color: "var(--color-accent-blue)" }}>{selectedBag.lcsc_part_number}</strong>
                 <span className="text-text-dim">—</span>
                 <span className="font-bold" style={{ color: "var(--color-accent-gold)" }}>{selectedBag.current_quantity} pcs</span>
                 <span className="text-text-dim">—</span>
                 <span>{selectedBag.container_display_name} / {selectedBag.layer_name}</span>
-                <span className="text-text-dim text-[11px] ml-auto">{selectedBag.manufacturer || ""} {selectedBag.package_type ? `(${selectedBag.package_type})` : ""}</span>
-                <button onClick={() => setSelectedBag(null)} className="cursor-pointer border-none bg-transparent text-text-dim text-[14px]">✕</button>
+                <a href={`https://www.lcsc.com/product-detail/${selectedBag.lcsc_part_number}.html`} target="_blank" rel="noopener"
+                  className="ml-auto text-[11px] underline" style={{ color: "var(--color-accent-blue)" }}>
+                  Open in LCSC ↗
+                </a>
+                <button onClick={() => setSelectedBag(null)} className="cursor-pointer border-none bg-transparent text-text-dim text-[16px] leading-none ml-1">✕</button>
               </div>
-              <iframe src={`https://www.lcsc.com/product-detail/${selectedBag.lcsc_part_number}.html`} className="flex-1 border-none w-full" style={{ background: "#fff" }} title={selectedBag.lcsc_part_number} sandbox="allow-scripts allow-same-origin allow-forms" />
+              <div className="grid grid-cols-4 gap-4 p-3 text-[12px] overflow-auto" style={{ color: "var(--color-text-secondary)" }}>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Order #</span>{selectedBag.order_number || "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">PBN (Batch)</span>{selectedBag.package_bill_no || "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">PDI</span>{selectedBag.packing_date || "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">MFG Part</span>{selectedBag.mfg_part_number || "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Manufacturer</span>{selectedBag.manufacturer || "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Package</span>{selectedBag.package_type || "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Scanned</span>{selectedBag.scanned_at ? selectedBag.scanned_at.replace("T"," ").slice(0,19) : "—"}</div>
+                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Updated</span>{selectedBag.updated_at ? selectedBag.updated_at.replace("T"," ").slice(0,19) : "—"}</div>
+              </div>
             </div>
           )}
         </div>
