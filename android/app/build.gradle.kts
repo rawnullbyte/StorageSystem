@@ -93,6 +93,7 @@ dependencies {
 
     // ML Kit Barcode Scanning + CameraX integration
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("androidx.camera:camera-mlkit-vision:1.4.1")
 
     // Ktor HTTP + WebSocket
     implementation("io.ktor:ktor-client-core:2.3.7")
