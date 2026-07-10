@@ -252,12 +252,29 @@ pub async fn lcsc_proxy(Path(path): Path<String>) -> Result<Response<Body>, (Sta
     let status = resp.status();
     let body_bytes = resp.bytes().await.map_err(|e| internal_error(&e))?;
 
+    // Inject cookie script into the HTML so the browser's document.cookie has it.
+    // LCSC's JS reads cookies client-side — sending them via request header isn't enough.
+    let injected = if status.is_success() {
+        let mut html = String::from_utf8_lossy(&body_bytes).to_string();
+        let script = r#"<script>document.cookie="LCSC_accepted-cookie-policy=yes_1;path=/;domain=.lcsc.com";</script>"#;
+        // Inject after <head> or at the beginning of <body>
+        if let Some(pos) = html.find("</head>") {
+            html.insert_str(pos, script);
+        } else if let Some(pos) = html.find("<body") {
+            if let Some(end) = html[pos..].find(">") {
+                html.insert_str(pos + end + 1, script);
+            }
+        }
+        Body::from(html)
+    } else {
+        Body::from(body_bytes.to_vec())
+    };
+
     let response = Response::builder()
         .status(status)
         .header("Content-Type", "text/html; charset=utf-8")
-        // Allow embedding in iframe (strip X-Frame-Options that LCSC sends)
         .header("X-Frame-Options", "ALLOWALL")
-        .body(Body::from(body_bytes.to_vec()))
+        .body(injected)
         .map_err(|e| internal_error(&e))?;
 
     Ok(response)
