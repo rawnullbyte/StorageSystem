@@ -3,12 +3,13 @@ package com.storagesystem.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.util.Size
 import android.view.MotionEvent
 import android.view.View
 import androidx.camera.core.CameraSelector
-import androidx.camera.mlkit.vision.MlKitAnalyzer
-import androidx.camera.view.CameraController
-import androidx.camera.view.LifecycleCameraController
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -25,14 +26,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE
 import com.storagesystem.data.models.DetectedQr
 import com.storagesystem.data.models.OverlayColor
 import com.storagesystem.data.models.QrType
 import com.storagesystem.data.repository.parseQrRaw
+import com.storagesystem.ui.camera.QrAnalyzer
 import kotlin.math.sqrt
+import java.util.concurrent.Executors
 
 @Composable
 fun CameraPreview(
@@ -45,11 +45,15 @@ fun CameraPreview(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestQrs = remember { mutableStateListOf<DetectedQr>() }
-    val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
+    val sensorToView = remember { mutableStateOf<android.graphics.Matrix?>(null) }
 
-    LaunchedEffect(torchOn, controllerRef.value) {
-        val ctrl = controllerRef.value ?: return@LaunchedEffect
-        try { ctrl.enableTorch(torchOn) } catch (_: Exception) {}
+    // Map from image coords (640x640) to view coords
+    fun mapBox(box: Rect): Rect {
+        val mat = sensorToView.value ?: return box
+        val src = android.graphics.RectF(box)
+        val dst = android.graphics.RectF()
+        mat.mapRect(dst, src)
+        return Rect(dst.left.toInt(), dst.top.toInt(), dst.right.toInt(), dst.bottom.toInt())
     }
 
     val hasCameraPermission = remember {
@@ -63,35 +67,44 @@ fun CameraPreview(
                 val pv = PreviewView(ctx)
                 if (!hasCameraPermission) return@AndroidView pv
 
-                val controller = LifecycleCameraController(ctx).apply {
-                    cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                    bindToLifecycle(lifecycleOwner)
-                }
-                controllerRef.value = controller
-                pv.controller = controller
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                cameraProviderFuture.addListener({
+                    val provider = cameraProviderFuture.get()
+                    val preview = Preview.Builder().build()
+                        .also { it.surfaceProvider = pv.surfaceProvider }
 
-                val scanner = BarcodeScanning.getClient(
-                    com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
-                        .setBarcodeFormats(FORMAT_QR_CODE).build()
-                )
-
-                controller.setImageAnalysisAnalyzer(
-                    ContextCompat.getMainExecutor(ctx),
-                    MlKitAnalyzer(
-                        listOf(scanner),
-                        CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED,
-                        ContextCompat.getMainExecutor(ctx)
-                    ) { result: MlKitAnalyzer.Result? ->
-                        val barcodes = result?.getValue(scanner) as? List<Barcode> ?: emptyList()
-                        val detected = barcodes.mapNotNull { barcode ->
-                            val raw = barcode.rawValue ?: return@mapNotNull null
-                            DetectedQr(raw, barcode.boundingBox ?: Rect(0,0,0,0), classifyQr(raw))
+                    // 640x640 is optimal for ML Kit barcode scanning — fast and close-range
+                    val analyzer = QrAnalyzer { qrs ->
+                        val mapped = qrs.map { qr ->
+                            qr.copy(boundingBox = mapBox(qr.boundingBox))
                         }
                         latestQrs.clear()
-                        latestQrs.addAll(detected)
-                        onQrsDetected(detected)
+                        latestQrs.addAll(mapped)
+                        onQrsDetected(mapped)
                     }
-                )
+
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setTargetResolution(Size(640, 640))
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+                        .also { it.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer) }
+
+                    provider.unbindAll()
+                    provider.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        imageAnalysis
+                    )
+
+                    // Get sensor-to-view matrix for coordinate mapping
+                    try { sensorToView.value = pv.getSensorToViewTransform() } catch (_: Exception) {}
+                }, ContextCompat.getMainExecutor(ctx))
+
+                // Update transform on layout changes
+                pv.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    try { sensorToView.value = pv.getSensorToViewTransform() } catch (_: Exception) {}
+                }
 
                 pv.setOnTouchListener { _: View, event: MotionEvent ->
                     if (event.action == MotionEvent.ACTION_UP) {

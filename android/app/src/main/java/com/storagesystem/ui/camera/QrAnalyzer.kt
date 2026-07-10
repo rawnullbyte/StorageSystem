@@ -1,6 +1,7 @@
 package com.storagesystem.ui.camera
 
 import android.graphics.Rect
+import android.util.Size
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.BarcodeScanner
@@ -12,17 +13,6 @@ import com.storagesystem.data.models.DetectedQr
 import com.storagesystem.data.models.QrType
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * CameraX [ImageAnalysis.Analyzer] that uses ML Kit [BarcodeScanner] to
- * detect QR codes in each camera frame.
- *
- * Bounding boxes are returned in **image coordinates** (the resolution
- * set via [ImageAnalysis.Builder.setTargetResolution]).
- * The caller must transform them to view coordinates via
- * [androidx.camera.view.transform.CoordinateTransform.mapRect].
- *
- * Frame throttle: processes every Nth frame to keep UI responsive.
- */
 class QrAnalyzer(
     private val onQrsDetected: (List<DetectedQr>) -> Unit
 ) : ImageAnalysis.Analyzer {
@@ -33,16 +23,8 @@ class QrAnalyzer(
             .build()
     )
 
-    private val frameCount = AtomicInteger(0)
-    private val throttle = 2  // process every 2nd frame
-
+    // Process every frame — ML Kit is fast enough with STRATEGY_KEEP_ONLY_LATEST
     override fun analyze(imageProxy: ImageProxy) {
-        val frame = frameCount.incrementAndGet()
-        if (frame % throttle != 0) {
-            imageProxy.close()
-            return
-        }
-
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
             imageProxy.close()
@@ -59,11 +41,7 @@ class QrAnalyzer(
                 val detected = barcodes.mapNotNull { barcode ->
                     val rawValue = barcode.rawValue ?: return@mapNotNull null
                     val box = barcode.boundingBox ?: return@mapNotNull null
-                    DetectedQr(
-                        rawValue = rawValue,
-                        boundingBox = box,
-                        qrType = classifyQr(rawValue)
-                    )
+                    DetectedQr(rawValue, box, classifyQr(rawValue))
                 }
                 if (detected.isNotEmpty()) {
                     onQrsDetected(detected)
@@ -75,15 +53,13 @@ class QrAnalyzer(
     }
 
     private fun classifyQr(rawValue: String): QrType {
-        val trimmed = rawValue.trim()
+        val t = rawValue.trim()
         return when {
-            trimmed.startsWith("{") && trimmed.contains("\"cid\"") -> QrType.CONTAINER
-            trimmed.startsWith("{") && trimmed.contains("=") -> QrType.LCSC_BAG
+            t.startsWith("{") && t.contains("\"cid\"") -> QrType.CONTAINER
+            t.startsWith("{") && (t.contains("=") || t.contains("pbn:") || t.contains(",pc:")) -> QrType.LCSC_BAG
             else -> QrType.UNKNOWN
         }
     }
 
-    fun close() {
-        scanner.close()
-    }
+    fun close() { scanner.close() }
 }
