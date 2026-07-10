@@ -3,7 +3,6 @@ package com.storagesystem.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import androidx.camera.core.CameraSelector
@@ -40,13 +39,8 @@ import com.storagesystem.data.repository.QrParseResult
 import kotlin.math.sqrt
 
 private const val TAG = "CameraPreview"
+private const val MAX_OBJECT_AREA_RATIO = 0.35f
 
-/**
- * Tracks a QR region across frames using ML Kit's built-in trackingId.
- * Once decoded, the object detector visually follows the region even when
- * the QR is blurry — updating the bounding box based on visual features
- * (corners, edges, contrast), not by re-reading the QR code.
- */
 private data class TrackedQr(
     var rawValue: String?,
     var boundingBox: Rect,
@@ -69,10 +63,7 @@ fun CameraPreview(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
-
-    // trackingId -> TrackedQr — persists across frames
     val tracked = remember { mutableStateMapOf<Int, TrackedQr>() }
-    // Full overlay for tap detection
     val overlayState = remember { mutableStateListOf<DetectedQr>() }
 
     LaunchedEffect(torchOn, controllerRef.value) {
@@ -81,8 +72,7 @@ fun CameraPreview(
     }
 
     LaunchedEffect(trackingResetSignal) {
-        tracked.clear()
-        overlayState.clear()
+        tracked.clear(); overlayState.clear()
     }
 
     val hasCameraPermission = remember {
@@ -103,19 +93,14 @@ fun CameraPreview(
                 controllerRef.value = controller
                 pv.controller = controller
 
-                // ── Barcode scanner (decodes QR content) ────────────────────
                 val barcodeScanner = BarcodeScanning.getClient(
                     com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
-                        .setBarcodeFormats(FORMAT_QR_CODE)
-                        .build()
+                        .setBarcodeFormats(FORMAT_QR_CODE).build()
                 )
-
-                // ── Object detector (tracks visual region) ──────────────────
                 val objectDetector = ObjectDetection.getClient(
                     ObjectDetectorOptions.Builder()
                         .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
-                        .enableMultipleObjects()
-                        .build()
+                        .enableMultipleObjects().build()
                 )
 
                 controller.setImageAnalysisAnalyzer(
@@ -128,9 +113,13 @@ fun CameraPreview(
                         val barcodes = result?.getValue(barcodeScanner) as? List<Barcode> ?: emptyList()
                         val objects = result?.getValue(objectDetector) as? List<DetectedObject> ?: emptyList()
 
-                        // ── Step 1: Object detector (visual tracking — every frame) ──
+                        val frameArea = pv.width * pv.height
+
+                        // ── Step 1: Object detector (visual tracking) ──────────
                         for (obj in objects) {
                             val tid = obj.trackingId ?: continue
+                            // Skip objects far too large to be a QR
+                            if (obj.boundingBox.width() * obj.boundingBox.height() > frameArea * MAX_OBJECT_AREA_RATIO) continue
                             val existing = tracked[tid]
                             if (existing != null) {
                                 existing.boundingBox = obj.boundingBox
@@ -143,7 +132,7 @@ fun CameraPreview(
                             }
                         }
 
-                        // ── Step 2: Barcode decoding ─────────────────────────────
+                        // ── Step 2: Barcode decoding ──────────────────────────
                         for (barcode in barcodes) {
                             val raw = barcode.rawValue ?: continue
                             val box = barcode.boundingBox ?: continue
@@ -162,19 +151,19 @@ fun CameraPreview(
                             )
                         }
 
-                        // ── Step 3: Remove lost tracks ───────────────────────────
+                        // ── Step 3: Remove lost tracks ────────────────────────
                         val activeIds = (objects.mapNotNull { it.trackingId } +
                                 barcodes.map { it.rawValue.hashCode() % 100000 }).toSet()
                         tracked.keys.removeIf { it !in activeIds }
 
-                        // ── Step 4: Fresh decodings for ViewModel + full overlay ──
+                        // ── Step 4: Output ─────────────────────────────────────
                         val freshDetections = tracked.values
                             .filter { it.isFromBarcode && it.rawValue != null }
                             .map { DetectedQr(it.rawValue!!, it.boundingBox, it.qrType) }
 
                         overlayState.clear()
                         overlayState.addAll(tracked.values
-                            .filter { it.rawValue != null && it.boundingBox.width() > 0 }
+                            .filter { it.rawValue != null && !it.boundingBox.isEmpty }
                             .map { DetectedQr(it.rawValue!!, it.boundingBox, it.qrType) })
                         onQrsDetected(freshDetections)
                     }
@@ -197,56 +186,51 @@ fun CameraPreview(
         )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val combined = overlayQrs.toMutableList()
+            // Draw from parent overlayQrs (has real color logic from scan mode)
+            for ((qr, color) in overlayQrs) {
+                drawQrBox(qr, color)
+            }
 
-            // Add tracked items — color by QR type (respects scanMode from parent)
+            // Add tracked-only QRs that aren't in overlayQrs — use RED as not confirmed this frame
+            val overlayKeys = overlayQrs.map { it.first.rawValue }.toSet()
             for (t in tracked.values) {
-                if (t.rawValue == null) continue
-                if (overlayQrs.any { it.first.rawValue == t.rawValue }) continue
-                val colorForTracked = when (t.qrType) {
-                    QrType.CONTAINER -> OverlayColor.YELLOW
-                    QrType.LCSC_BAG -> OverlayColor.BLUE
-                    QrType.UNKNOWN -> OverlayColor.RED_NON_MATCH
-                }
-                combined.add(DetectedQr(t.rawValue!!, t.boundingBox, t.qrType) to colorForTracked)
+                if (t.rawValue == null || t.rawValue in overlayKeys || t.boundingBox.isEmpty) continue
+                drawQrBox(DetectedQr(t.rawValue!!, t.boundingBox, t.qrType), OverlayColor.RED_NON_MATCH)
             }
 
-            for ((qr, color) in combined) {
-                val box = qr.boundingBox; if (box.isEmpty) continue
-                val drawColor = when (color) {
-                    OverlayColor.YELLOW -> Color.Yellow
-                    OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
-                    OverlayColor.BLUE -> Color.Blue
-                    OverlayColor.RED_NON_MATCH -> Color.Red
-                }
-                val sw = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
-                drawRect(drawColor, Offset(box.left.toFloat(), box.top.toFloat()),
-                    ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = sw))
-                drawRect(drawColor.copy(alpha = when (color) {
-                    OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f
-                    OverlayColor.BLUE -> 0.2f; else -> 0.15f
-                }), Offset(box.left.toFloat(), box.top.toFloat()),
-                    ComposeSize(box.width().toFloat(), box.height().toFloat()))
-
-                val label = buildQuickLabel(qr, color) ?: continue
-                val paint = android.graphics.Paint().apply {
-                    this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
-                    typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true
-                }
-                val bg = android.graphics.Paint().apply {
-                    this.color = android.graphics.Color.argb(200, 0, 0, 0)
-                }
-                val tw = paint.measureText(label)
-                val lx = (box.left + box.right - tw.toInt()) / 2f
-                val ly = (box.top - 12f).coerceAtLeast(4f)
-                drawContext.canvas.nativeCanvas.drawRoundRect(
-                    lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg
-                )
-                drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
-            }
             drawAimReticle(size)
         }
     }
+}
+
+/** Draw a single QR box with label — extracted to avoid duplication. */
+private fun DrawScope.drawQrBox(qr: DetectedQr, color: OverlayColor) {
+    val box = qr.boundingBox; if (box.isEmpty) return
+    val drawColor = when (color) {
+        OverlayColor.YELLOW -> Color.Yellow
+        OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
+        OverlayColor.BLUE -> Color.Blue
+        OverlayColor.RED_NON_MATCH -> Color.Red
+    }
+    val sw = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
+    drawRect(drawColor, Offset(box.left.toFloat(), box.top.toFloat()),
+        ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = sw))
+    drawRect(drawColor.copy(alpha = when (color) {
+        OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f
+        OverlayColor.BLUE -> 0.2f; else -> 0.15f
+    }), Offset(box.left.toFloat(), box.top.toFloat()),
+        ComposeSize(box.width().toFloat(), box.height().toFloat()))
+
+    val label = buildQuickLabel(qr, color) ?: return
+    val paint = android.graphics.Paint().apply {
+        this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
+        typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true
+    }
+    val bg = android.graphics.Paint().apply { this.color = android.graphics.Color.argb(200, 0, 0, 0) }
+    val tw = paint.measureText(label)
+    val lx = (box.left + box.right - tw.toInt()) / 2f; val ly = (box.top - 12f).coerceAtLeast(4f)
+    drawContext.canvas.nativeCanvas.drawRoundRect(lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg)
+    drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
 }
 
 private val qrLabelCache = mutableMapOf<String, String?>()
