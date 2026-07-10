@@ -243,6 +243,8 @@ pub async fn lcsc_proxy(Path(path): Path<String>) -> Result<Response<Body>, (Sta
 
     let resp = client.get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        // Accept cookie policy to suppress the LCSC cookie banner in iframe
+        .header("Cookie", "LCSC_accepted-cookie-policy=yes_1")
         .send()
         .await
         .map_err(|e| internal_error(&e))?;
