@@ -205,7 +205,6 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 CameraPreview(
                     overlayQrs = overlayQrs,
                     torchOn = torchOn,
-                    trackingResetSignal = scanMode.ordinal + (if (assignPhase == "select_container") 0 else 10),
                     onQrsDetected = { qrs ->
                         viewModel.updateDetectedQrs(qrs)
                         // Auto-scan: auto-register containers without tapping
