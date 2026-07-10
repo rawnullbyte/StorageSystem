@@ -254,7 +254,7 @@ pub async fn lcsc_proxy(Path(path): Path<String>) -> Result<Response<Body>, (Sta
     // LCSC's JS reads cookies client-side — sending them via request header isn't enough.
     let injected = if status.is_success() {
         let mut html = String::from_utf8_lossy(&body_bytes).to_string();
-        let script = r#"<script>document.cookie="LCSC_accepted-cookie-policy=yes_1;path=/;domain=.lcsc.com";</script>"#;
+        let script = r#"<script>document.cookie="LCSC_accepted-cookie-policy=yes_1;path=/";</script>"#;
         // Inject after <head> or at the beginning of <body>
         if let Some(pos) = html.find("</head>") {
             html.insert_str(pos, script);
