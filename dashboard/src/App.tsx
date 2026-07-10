@@ -240,12 +240,12 @@ export default function App() {
               ))}
             </tbody>
           </table>
-          <div className="px-3 py-1 text-[11px] border-t" style={{ color: "var(--color-text-dim)", borderColor: "var(--color-surface-300)", background: "var(--color-surface-700)" }}>
+          </div>
+          {/* /inner table scroll div */}
+          <div className="px-3 py-1 text-[11px] border-t flex-shrink-0" style={{ color: "var(--color-text-dim)", borderColor: "var(--color-surface-300)", background: "var(--color-surface-700)" }}>
             {displayBags.length} bag{displayBags.length !== 1 ? "s" : ""} {selectedContainer ? "in selected container" : ""}
             {selectedBag && <span className="ml-4">• selected: <strong className="text-text-secondary">{selectedBag.lcsc_part_number}</strong></span>}
           </div>
-          </div>
-          {/* /inner table scroll div */}
 
           {/* LCSC product page — resizable panel */}
           {selectedBag && (
