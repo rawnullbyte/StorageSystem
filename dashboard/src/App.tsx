@@ -38,6 +38,9 @@ export default function App() {
   const resizing = useRef(false);
   const resizingIframe = useRef(false);
 
+  // Set LCSC cookie so proxied product page hides the cookie consent banner
+  useEffect(() => { if (selectedBag) document.cookie = "LCSC_accepted-cookie-policy=yes_1;path=/"; }, [selectedBag]);
+
   const load = useCallback(() => {
     api<Layer[]>("/api/layers").then(setLayers).catch(console.error);
     api<Container[]>("/api/containers").then(setContainers).catch(console.error);
