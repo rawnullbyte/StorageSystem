@@ -3,7 +3,6 @@ package com.storagesystem.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Rect
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import androidx.camera.core.CameraSelector
@@ -36,54 +35,60 @@ import com.storagesystem.data.repository.parseQrRaw
 import com.storagesystem.data.repository.QrParseResult
 import kotlin.math.sqrt
 
-private const val TAG = "CameraPreview"
-private const val MAX_TRACKING_HISTORY = 8
-private const val MAX_PREDICTION_MS = 2000L
+private const val MAX_HISTORY = 12
+private const val MAX_PREDICTION_MS = 2500L
+private const val CONFIDENT_MS = 150L
 
 /**
- * Velocity-based QR tracker:
- * - Stores last N bounding boxes + timestamps for each QR
- * - Computes velocity (dx, dy) from recent positions
- * - When QR isn't detected, predicts position using velocity
- * - This gives Lens-like persistent box that follows the QR even when blurry
+ * Tracks a QR code's position using velocity from recent detection history.
+ * Once the QR is decoded once, we can predict where it is even when blurry
+ * by extrapolating its movement. Tracking is lost after 2.5s of no detections.
  */
-private class QrPrediction(
-    val rawValue: String,
-    val qrType: QrType,
-    positions: MutableList<Pair<Rect, Long>> = mutableListOf()
-) {
-    val history: MutableList<Pair<Rect, Long>> = positions
+private class QrPrediction(val rawValue: String, val qrType: QrType) {
+    private val history = mutableListOf<Pair<Rect, Long>>()
 
     fun addPosition(box: Rect, timeMs: Long) {
-        history.add(Pair(box, timeMs))
-        while (history.size > MAX_TRACKING_HISTORY) history.removeAt(0)
+        history.add(box to timeMs)
+        while (history.size > MAX_HISTORY) history.removeAt(0)
     }
 
-    /** Predict current position based on velocity, or return latest if no history. */
-    fun predict(timeMs: Long): Rect? {
+    /** Returns predicted position, or null if tracking is lost. */
+    fun predict(currentMs: Long): Rect? {
         if (history.isEmpty()) return null
-        val latest = history.last().first
-        if (history.size < 2 || timeMs - history.last().second > MAX_PREDICTION_MS) return latest
+        val latest = history.last()
+        val elapsed = currentMs - latest.second
 
-        // Compute velocity from last few frames
-        val recent = history.takeLast(3)
-        var dx = 0f; var dy = 0f; var count = 0
+        // Lost tracking if too long since last detection
+        if (elapsed > MAX_PREDICTION_MS) return null
+
+        // Fresh detection — use exact position
+        if (elapsed < CONFIDENT_MS) return latest.first
+
+        // Need at least 2 points for velocity
+        if (history.size < 2) return latest.first
+
+        // Average velocity from last 5 detections
+        val recent = history.takeLast(5)
+        var dx = 0f; var dy = 0f; var dt = 0f
         for (i in 1 until recent.size) {
-            val dt = (recent[i].second - recent[i - 1].second).toFloat()
-            if (dt > 0) {
-                dx += (recent[i].first.centerX() - recent[i - 1].first.centerX()) / dt
-                dy += (recent[i].first.centerY() - recent[i - 1].first.centerY()) / dt
-                count++
+            val t = (recent[i].second - recent[i - 1].second).toFloat()
+            if (t > 0) {
+                dx += recent[i].first.centerX() - recent[i - 1].first.centerX()
+                dy += recent[i].first.centerY() - recent[i - 1].first.centerY()
+                dt += t
             }
         }
-        if (count == 0) return latest
+        if (dt < 10f) return latest.first
 
-        val avgDx = dx / count; val avgDy = dy / count
-        val elapsed = timeMs - history.last().second
-        val predictedLeft = (latest.left + avgDx * elapsed).toInt()
-        val predictedTop = (latest.top + avgDy * elapsed).toInt()
-        val w = latest.width(); val h = latest.height()
-        return Rect(predictedLeft, predictedTop, predictedLeft + w, predictedTop + h)
+        val vx = dx / dt; val vy = dy / dt
+        val w = latest.first.width(); val h = latest.first.height()
+
+        return Rect(
+            (latest.first.left + vx * elapsed).toInt(),
+            (latest.first.top + vy * elapsed).toInt(),
+            (latest.first.left + vx * elapsed + w).toInt(),
+            (latest.first.top + vy * elapsed + h).toInt()
+        )
     }
 }
 
@@ -101,20 +106,19 @@ fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
 
-    // Predictions keyed by QR raw value
+    // Tracked predictions — persist across frames, survive blurry frames
     val predictions = remember { mutableStateMapOf<String, QrPrediction>() }
-    val latestQrs = remember { mutableStateListOf<DetectedQr>() }
+    // Full overlay list (real + predicted) for tap detection
+    val overlayListState = remember { mutableStateListOf<DetectedQr>() }
 
-    // Torch control
     LaunchedEffect(torchOn, controllerRef.value) {
         val ctrl = controllerRef.value ?: return@LaunchedEffect
         try { ctrl.enableTorch(torchOn) } catch (_: Exception) {}
     }
 
-    // Reset tracking
     LaunchedEffect(trackingResetSignal) {
         predictions.clear()
-        latestQrs.clear()
+        overlayListState.clear()
     }
 
     val hasCameraPermission = remember {
@@ -150,45 +154,50 @@ fun CameraPreview(
                     ) { result: MlKitAnalyzer.Result? ->
                         val now = System.currentTimeMillis()
                         val barcodes: List<Barcode>? = result?.getValue(scanner) as? List<Barcode>
-                        val detected = (barcodes ?: emptyList()).mapNotNull { barcode ->
-                            val raw = barcode.rawValue ?: return@mapNotNull null
-                            DetectedQr(
-                                rawValue = raw,
-                                boundingBox = barcode.boundingBox ?: Rect(0, 0, 0, 0),
-                                qrType = classifyQr(raw)
-                            )
+
+                        // Real detections this frame
+                        val newDetections = (barcodes ?: emptyList()).mapNotNull { b ->
+                            val raw = b.rawValue ?: return@mapNotNull null
+                            DetectedQr(raw, b.boundingBox ?: Rect(0,0,0,0), classifyQr(raw))
                         }
 
-                        // Update prediction history with detected QRs
-                        val detectedKeys = mutableSetOf<String>()
-                        for (qr in detected) {
-                            detectedKeys.add(qr.rawValue)
+                        val detectedKeys = newDetections.map { it.rawValue }.toSet()
+
+                        // Update prediction history with real detections
+                        for (qr in newDetections) {
+                            if (qr.boundingBox.isEmpty) continue
                             val pred = predictions.getOrPut(qr.rawValue) {
                                 QrPrediction(qr.rawValue, qr.qrType)
                             }
                             pred.addPosition(qr.boundingBox, now)
                         }
 
-                        // Build overlay: detected QRs + predicted positions for undetected ones
-                        val overlayList = detected.toMutableList()
+                        // Build overlay: real detections + predicted positions
+                        val overlay = mutableListOf<DetectedQr>()
+                        overlay.addAll(newDetections)
+
+                        val toRemove = mutableListOf<String>()
                         for ((raw, pred) in predictions) {
                             if (raw in detectedKeys) continue
-                            val predictedBox = pred.predict(now) ?: continue
-                            overlayList.add(
-                                DetectedQr(raw, predictedBox, pred.qrType)
-                            )
+                            val predictedBox = pred.predict(now)
+                            if (predictedBox != null) {
+                                overlay.add(DetectedQr(raw, predictedBox, pred.qrType))
+                            } else {
+                                toRemove.add(raw)
+                            }
                         }
+                        for (key in toRemove) predictions.remove(key)
 
-                        latestQrs.clear()
-                        latestQrs.addAll(overlayList)
-                        onQrsDetected(detected)
+                        overlayListState.clear()
+                        overlayListState.addAll(overlay)
+                        onQrsDetected(newDetections)
                     }
                 )
 
                 pv.setOnTouchListener { _: View, event: MotionEvent ->
                     if (event.action == MotionEvent.ACTION_UP) {
                         val tx = event.x; val ty = event.y
-                        val tapped = latestQrs.minByOrNull { qr ->
+                        val tapped = overlayListState.minByOrNull { qr ->
                             val r = qr.boundingBox
                             val cx = (r.left + r.right) / 2f; val cy = (r.top + r.bottom) / 2f
                             sqrt((tx - cx) * (tx - cx) + (ty - cy) * (ty - cy))
@@ -205,21 +214,17 @@ fun CameraPreview(
             val now = System.currentTimeMillis()
             val overlayKeys = overlayQrs.map { it.first.rawValue }.toSet()
 
-            // Overlay QRs from state + predicted QRs
-            val combinedQrs = overlayQrs.toMutableList()
+            // Start with state-provided overlay QRs
+            val combined = overlayQrs.toMutableList()
+
+            // Add predicted (tracked but not decoded this frame) as green
             for ((raw, pred) in predictions) {
                 if (raw in overlayKeys) continue
                 val predictedBox = pred.predict(now) ?: continue
-                val qrType = pred.qrType
-                val color = when (qrType) {
-                    QrType.CONTAINER -> OverlayColor.GREEN
-                    QrType.LCSC_BAG -> OverlayColor.GREEN
-                    QrType.UNKNOWN -> OverlayColor.RED_NON_MATCH
-                }
-                combinedQrs.add(DetectedQr(raw, predictedBox, qrType) to color)
+                combined.add(DetectedQr(raw, predictedBox, pred.qrType) to OverlayColor.GREEN)
             }
 
-            for ((qr, color) in combinedQrs) {
+            for ((qr, color) in combined) {
                 val box = qr.boundingBox; if (box.isEmpty) continue
                 val drawColor = when (color) {
                     OverlayColor.YELLOW -> Color.Yellow
@@ -230,16 +235,26 @@ fun CameraPreview(
                 val sw = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
                 drawRect(drawColor, Offset(box.left.toFloat(), box.top.toFloat()),
                     ComposeSize(box.width().toFloat(), box.height().toFloat()), style = Stroke(width = sw))
-                drawRect(drawColor.copy(alpha = when (color) { OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f; OverlayColor.BLUE -> 0.2f; else -> 0.15f }),
-                    Offset(box.left.toFloat(), box.top.toFloat()), ComposeSize(box.width().toFloat(), box.height().toFloat()))
+                drawRect(drawColor.copy(alpha = when (color) {
+                    OverlayColor.GREEN_MATCH -> 0.3f; OverlayColor.YELLOW -> 0.25f
+                    OverlayColor.BLUE -> 0.2f; else -> 0.15f
+                }), Offset(box.left.toFloat(), box.top.toFloat()),
+                    ComposeSize(box.width().toFloat(), box.height().toFloat()))
 
                 val label = buildQuickLabel(qr, color) ?: continue
-                val paint = android.graphics.Paint().apply { this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
-                    typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true }
-                val bg = android.graphics.Paint().apply { this.color = android.graphics.Color.argb(200, 0, 0, 0) }
+                val paint = android.graphics.Paint().apply {
+                    this.color = drawColor.toArgb(); textSize = 36f; isAntiAlias = true
+                    typeface = android.graphics.Typeface.MONOSPACE; isFakeBoldText = true
+                }
+                val bg = android.graphics.Paint().apply {
+                    this.color = android.graphics.Color.argb(200, 0, 0, 0)
+                }
                 val tw = paint.measureText(label)
-                val lx = (box.left + box.right - tw.toInt()) / 2f; val ly = (box.top - 12f).coerceAtLeast(4f)
-                drawContext.canvas.nativeCanvas.drawRoundRect(lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg)
+                val lx = (box.left + box.right - tw.toInt()) / 2f
+                val ly = (box.top - 12f).coerceAtLeast(4f)
+                drawContext.canvas.nativeCanvas.drawRoundRect(
+                    lx - 8f, ly - 30f, lx + tw + 8f, ly + 4f, 6f, 6f, bg
+                )
                 drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
             }
             drawAimReticle(size)
