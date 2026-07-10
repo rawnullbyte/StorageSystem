@@ -74,7 +74,7 @@ export default function App() {
   useEffect(() => {
     const mm = (e: MouseEvent) => {
       if (resizing.current) setSidebarW(Math.max(120, Math.min(500, e.clientX)));
-      if (resizingIframe.current) setIframeH(Math.max(120, Math.min(window.innerHeight * 0.75, window.innerHeight - e.clientY - 35)));
+      if (resizingIframe.current) setIframeH(Math.max(120, Math.min(window.innerHeight * 0.75, window.innerHeight - e.clientY)));
     };
     const mu = () => { resizing.current = false; resizingIframe.current = false; };
     window.addEventListener("mousemove", mm); window.addEventListener("mouseup", mu);
