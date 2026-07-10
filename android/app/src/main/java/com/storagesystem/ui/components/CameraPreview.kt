@@ -191,11 +191,16 @@ fun CameraPreview(
                 drawQrBox(qr, color)
             }
 
-            // Add tracked-only QRs that aren't in overlayQrs — use RED as not confirmed this frame
+            // Add tracked-only QRs — same color as when they were last decoded
             val overlayKeys = overlayQrs.map { it.first.rawValue }.toSet()
             for (t in tracked.values) {
                 if (t.rawValue == null || t.rawValue in overlayKeys || t.boundingBox.isEmpty) continue
-                drawQrBox(DetectedQr(t.rawValue!!, t.boundingBox, t.qrType), OverlayColor.RED_NON_MATCH)
+                val trackColor = when (t.qrType) {
+                    QrType.CONTAINER -> OverlayColor.YELLOW
+                    QrType.LCSC_BAG -> OverlayColor.BLUE
+                    QrType.UNKNOWN -> OverlayColor.RED_NON_MATCH
+                }
+                drawQrBox(DetectedQr(t.rawValue!!, t.boundingBox, t.qrType), trackColor)
             }
 
             drawAimReticle(size)
