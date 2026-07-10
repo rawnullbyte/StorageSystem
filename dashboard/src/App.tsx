@@ -33,8 +33,10 @@ export default function App() {
   const [editVal, setEditVal] = useState("");
   const [sort, setSort] = useState<{col: string, desc: boolean}>({col: "scanned_at", desc: true});
   const [sidebarW, setSidebarW] = useState(260);
+  const [iframeH, setIframeH] = useState(400);
   const [filter, setFilter] = useState("");
   const resizing = useRef(false);
+  const resizingIframe = useRef(false);
 
   const load = useCallback(() => {
     api<Layer[]>("/api/layers").then(setLayers).catch(console.error);
@@ -68,10 +70,13 @@ export default function App() {
     return () => window.removeEventListener("keydown", h);
   }, [load]);
 
-  // Sidebar resize
+  // Sidebar + iframe resize
   useEffect(() => {
-    const mm = (e: MouseEvent) => { if (resizing.current) setSidebarW(Math.max(120, Math.min(500, e.clientX))); };
-    const mu = () => { resizing.current = false; };
+    const mm = (e: MouseEvent) => {
+      if (resizing.current) setSidebarW(Math.max(120, Math.min(500, e.clientX)));
+      if (resizingIframe.current) setIframeH(Math.max(150, Math.min(window.innerHeight - 100, window.innerHeight - e.clientY)));
+    };
+    const mu = () => { resizing.current = false; resizingIframe.current = false; };
     window.addEventListener("mousemove", mm); window.addEventListener("mouseup", mu);
     return () => { window.removeEventListener("mousemove", mm); window.removeEventListener("mouseup", mu); };
   }, []);
@@ -117,7 +122,7 @@ export default function App() {
           className="ml-4 px-2 py-[2px] rounded text-[12px] border"
           style={{ width: 200, background: "var(--color-surface-900)", borderColor: "var(--color-surface-300)", color: "var(--color-text-primary)" }} />
         <span className="ml-auto text-[11px]" style={{ color: wsStatus === "connected" ? "var(--color-accent-green)" : "var(--color-accent-red)" }}>
-          ● {wsStatus} <span className="text-text-dim ml-2">R: refresh</span>
+          ● {wsStatus}
         </span>
       </header>
 
@@ -239,32 +244,33 @@ export default function App() {
             {selectedBag && <span className="ml-4">• selected: <strong className="text-text-secondary">{selectedBag.lcsc_part_number}</strong></span>}
           </div>
 
-          {/* Bag detail panel (flexible height) */}
+          {/* LCSC product page — resizable panel */}
           {selectedBag && (
-            <div className="flex-shrink-0 border-t" style={{ borderColor: "var(--color-surface-300)", background: "var(--color-surface-950)", maxHeight: "40vh" }}>
-              <div className="flex items-center gap-2 px-3 py-2 text-[12px] border-b" style={{ background: "var(--color-surface-700)", borderColor: "var(--color-surface-300)" }}>
-                <strong style={{ color: "var(--color-accent-blue)" }}>{selectedBag.lcsc_part_number}</strong>
-                <span className="text-text-dim">—</span>
-                <span className="font-bold" style={{ color: "var(--color-accent-gold)" }}>{selectedBag.current_quantity} pcs</span>
-                <span className="text-text-dim">—</span>
-                <span>{selectedBag.container_display_name} / {selectedBag.layer_name}</span>
-                <a href={`https://www.lcsc.com/product-detail/${selectedBag.lcsc_part_number}.html`} target="_blank" rel="noopener"
-                  className="ml-auto text-[11px] underline" style={{ color: "var(--color-accent-blue)" }}>
-                  Open in LCSC ↗
-                </a>
-                <button onClick={() => setSelectedBag(null)} className="cursor-pointer border-none bg-transparent text-text-dim text-[16px] leading-none ml-1">✕</button>
+            <>
+              {/* Resize handle */}
+              <div onMouseDown={() => resizingIframe.current = true}
+                className="h-[5px] cursor-row-resize flex-shrink-0 border-t border-b" style={{ borderColor: "var(--color-surface-300)", background: "var(--color-surface-600)" }} />
+              <div style={{ height: iframeH, borderTop: "1px solid var(--color-surface-300)", background: "var(--color-surface-950)", display: "flex", flexDirection: "column" }}>
+                <div className="flex items-center gap-2 px-3 py-1 text-[12px] border-b flex-shrink-0" style={{ background: "var(--color-surface-700)", borderColor: "var(--color-surface-300)" }}>
+                  <strong style={{ color: "var(--color-accent-blue)" }}>{selectedBag.lcsc_part_number}</strong>
+                  <span className="text-text-dim">—</span>
+                  <span className="font-bold" style={{ color: "var(--color-accent-gold)" }}>{selectedBag.current_quantity} pcs</span>
+                  <span className="text-text-dim">—</span>
+                  <span>{selectedBag.container_display_name} / {selectedBag.layer_name}</span>
+                  <a href={`https://www.lcsc.com/product-detail/${selectedBag.lcsc_part_number}.html`} target="_blank" rel="noopener"
+                    className="ml-auto text-[11px] underline" style={{ color: "var(--color-accent-blue)" }}>
+                    Open in LCSC ↗
+                  </a>
+                  <button onClick={() => setSelectedBag(null)} className="cursor-pointer border-none bg-transparent text-text-dim text-[16px] leading-none ml-1">✕</button>
+                </div>
+                <iframe
+                  src={`/api/lcsc-proxy/product-detail/${selectedBag.lcsc_part_number}.html`}
+                  className="flex-1 w-full border-none"
+                  style={{ background: "#fff" }}
+                  title={selectedBag.lcsc_part_number}
+                />
               </div>
-              <div className="grid grid-cols-4 gap-4 p-3 text-[12px] overflow-auto" style={{ color: "var(--color-text-secondary)" }}>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Order #</span>{selectedBag.order_number || "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">PBN (Batch)</span>{selectedBag.package_bill_no || "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">PDI</span>{selectedBag.packing_date || "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">MFG Part</span>{selectedBag.mfg_part_number || "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Manufacturer</span>{selectedBag.manufacturer || "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Package</span>{selectedBag.package_type || "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Scanned</span>{selectedBag.scanned_at ? selectedBag.scanned_at.replace("T"," ").slice(0,19) : "—"}</div>
-                <div><span className="text-text-dim block text-[10px] uppercase tracking-wide">Updated</span>{selectedBag.updated_at ? selectedBag.updated_at.replace("T"," ").slice(0,19) : "—"}</div>
-              </div>
-            </div>
+            </>
           )}
         </div>
       </div>
