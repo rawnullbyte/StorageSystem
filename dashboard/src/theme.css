@@ -1,0 +1,45 @@
+/* ── StorageSystem Design System ───────────────────────────────── */
+/* Tailwind v4 — all colors centralized here                       */
+
+@import "tailwindcss";
+
+@theme {
+  /* Dark industrial palette */
+  --color-surface-950: #0a0a0f;
+  --color-surface-900: #0f1117;
+  --color-surface-800: #13151d;
+  --color-surface-700: #161822;
+  --color-surface-600: #1e1e24;
+  --color-surface-500: #1a1c28;
+  --color-surface-400: #1e293b;
+  --color-surface-300: #2a2d35;
+  --color-surface-200: #3a3d45;
+  --color-surface-100: #555;
+
+  /* Text */
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #666;
+  --color-text-dim: #555;
+
+  /* Accents */
+  --color-accent-blue: #60a5fa;
+  --color-accent-gold: #facc15;
+  --color-accent-green: #4ade80;
+  --color-accent-red: #f87171;
+}
+
+/* Global defaults */
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--color-surface-900);
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+/* Styled scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--color-surface-900); }
+::-webkit-scrollbar-thumb { background: var(--color-surface-300); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-surface-200); }
+::selection { background: #3b82f6; color: #fff; }
