@@ -74,7 +74,7 @@ export default function App() {
   useEffect(() => {
     const mm = (e: MouseEvent) => {
       if (resizing.current) setSidebarW(Math.max(120, Math.min(500, e.clientX)));
-      if (resizingIframe.current) setIframeH(Math.max(150, Math.min(window.innerHeight - 100, window.innerHeight - e.clientY)));
+      if (resizingIframe.current) setIframeH(Math.max(120, Math.min(window.innerHeight / 2, window.innerHeight - e.clientY - 40)));
     };
     const mu = () => { resizing.current = false; resizingIframe.current = false; };
     window.addEventListener("mousemove", mm); window.addEventListener("mouseup", mu);
@@ -168,8 +168,9 @@ export default function App() {
         {/* Resize handle */}
         <div onMouseDown={() => resizing.current = true} className="w-[4px] flex-shrink-0 cursor-col-resize" style={{ background: "var(--color-surface-600)" }} />
 
-        {/* Main */}
-        <div className="flex-1 overflow-auto">
+        {/* Main — flex column, table fills remaining space, iframe at bottom */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-auto">
           {selectedContainer && selContainer && (
             <div className="px-3 py-[6px] text-[12px] border-b"
               style={{ background: "var(--color-surface-400)", borderColor: "var(--color-surface-300)", color: "var(--color-text-secondary)" }}>
@@ -243,6 +244,8 @@ export default function App() {
             {displayBags.length} bag{displayBags.length !== 1 ? "s" : ""} {selectedContainer ? "in selected container" : ""}
             {selectedBag && <span className="ml-4">• selected: <strong className="text-text-secondary">{selectedBag.lcsc_part_number}</strong></span>}
           </div>
+          </div>
+          {/* /inner table scroll div */}
 
           {/* LCSC product page — resizable panel */}
           {selectedBag && (
@@ -250,7 +253,7 @@ export default function App() {
               {/* Resize handle */}
               <div onMouseDown={() => resizingIframe.current = true}
                 className="h-[5px] cursor-row-resize flex-shrink-0 border-t border-b" style={{ borderColor: "var(--color-surface-300)", background: "var(--color-surface-600)" }} />
-              <div style={{ height: iframeH, borderTop: "1px solid var(--color-surface-300)", background: "var(--color-surface-950)", display: "flex", flexDirection: "column" }}>
+              <div className="flex-shrink-0" style={{ height: iframeH, background: "var(--color-surface-950)", display: "flex", flexDirection: "column" }}>
                 <div className="flex items-center gap-2 px-3 py-1 text-[12px] border-b flex-shrink-0" style={{ background: "var(--color-surface-700)", borderColor: "var(--color-surface-300)" }}>
                   <strong style={{ color: "var(--color-accent-blue)" }}>{selectedBag.lcsc_part_number}</strong>
                   <span className="text-text-dim">—</span>
