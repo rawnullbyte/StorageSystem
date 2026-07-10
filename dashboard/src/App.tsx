@@ -95,6 +95,10 @@ export default function App() {
     setEditCell(null); load();
   }
 
+  async function renameContainer(id: string, currentName: string) {
+    const n = prompt("Rename container:", currentName);
+    if (n && n !== currentName) { await api(`/api/containers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ display_name: n }) }).catch(console.error); load(); }
+  }
   async function deleteContainer(id: string) {
     if (confirm("Delete this container?")) { await api(`/api/containers/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(console.error); load(); }
   }
@@ -144,6 +148,7 @@ export default function App() {
                   <div key={c.id} onClick={() => { setSelectedContainer(selectedContainer === c.id ? null : c.id); }}
                     style={{ padding: "2px 8px 2px 40px", cursor: "pointer", fontSize: 12, background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
                     {c.display_name}
+                    <button onClick={e => { e.stopPropagation(); renameContainer(c.id, c.display_name); }} style={{ cursor:"pointer", border:"none", background:"none", fontSize:11, color:"#2563eb" }}>✎</button>
                     <button onClick={e => { e.stopPropagation(); deleteContainer(c.id); }} style={{ marginLeft: 8, cursor:"pointer", border:"none", background:"none", fontSize:10, color:"#c00" }}>✕</button>
                   </div>
                 ))}
@@ -158,6 +163,8 @@ export default function App() {
               <div key={c.id} onClick={() => setSelectedContainer(selectedContainer === c.id ? null : c.id)}
                 style={{ padding: "2px 8px 2px 24px", cursor: "pointer", fontSize: 12, background: selectedContainer === c.id ? "#dbeafe" : "transparent" }}>
                 {c.display_name}
+                <button onClick={e => { e.stopPropagation(); renameContainer(c.id, c.display_name); }} style={{ cursor:"pointer", border:"none", background:"none", fontSize:11, color:"#2563eb" }}>✎</button>
+                <button onClick={e => { e.stopPropagation(); deleteContainer(c.id); }} style={{ marginLeft: 8, cursor:"pointer", border:"none", background:"none", fontSize:10, color:"#c00" }}>✕</button>
               </div>
             ))}
           </div>}
