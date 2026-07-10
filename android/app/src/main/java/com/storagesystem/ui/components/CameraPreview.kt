@@ -38,6 +38,13 @@ import kotlin.math.sqrt
 
 private const val TAG = "CameraPreview"
 
+/**
+ * Google Lens-style QR tracking:
+ * - Once a QR code is scanned, we lock onto it and persist its bounding box.
+ * - When the QR becomes unreadable (camera moves away), the last known box stays.
+ * - When the QR is re-detected, the position updates.
+ * - This gives the smooth "tracking" feel even during blurry/moved frames.
+ */
 @Composable
 fun CameraPreview(
     overlayQrs: List<Pair<DetectedQr, OverlayColor>>,
@@ -45,12 +52,16 @@ fun CameraPreview(
     onTapQr: (DetectedQr) -> Unit,
     modifier: Modifier = Modifier,
     torchOn: Boolean = false,
-    onTorchChanged: ((Boolean) -> Unit)? = null
+    onTorchChanged: ((Boolean) -> Unit)? = null,
+    trackingResetSignal: Int = 0  // increment to clear persisted QR tracking
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val latestQrs = remember { mutableStateListOf<DetectedQr>() }
     val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
+
+    // Persisted QR tracking — survives across frames even when QR isn't detected
+    val trackedQrs = remember { mutableStateMapOf<String, DetectedQr>() }
+    val latestQrs = remember { mutableStateListOf<DetectedQr>() }
 
     // Torch control
     LaunchedEffect(torchOn, controllerRef.value) {
@@ -58,9 +69,10 @@ fun CameraPreview(
         try { ctrl.enableTorch(torchOn) } catch (_: Exception) {}
     }
 
-    LaunchedEffect(overlayQrs) {
+    // Clear tracked QRs when reset signal changes (mode switch, etc.)
+    LaunchedEffect(trackingResetSignal) {
+        trackedQrs.clear()
         latestQrs.clear()
-        latestQrs.addAll(overlayQrs.map { it.first })
     }
 
     val hasCameraPermission = remember {
@@ -103,6 +115,15 @@ fun CameraPreview(
                                 qrType = classifyQr(raw)
                             )
                         }
+
+                        // Google Lens-style: if we detect QRs, update tracked positions.
+                        // If nothing detected, the old tracked positions stay (persistent tracking).
+                        if (detected.isNotEmpty()) {
+                            for (qr in detected) {
+                                trackedQrs[qr.rawValue] = qr
+                            }
+                        }
+                        // Always keep the latest detection results for tap handling
                         latestQrs.clear()
                         latestQrs.addAll(detected)
                         onQrsDetected(detected)
@@ -112,7 +133,9 @@ fun CameraPreview(
                 pv.setOnTouchListener { _: View, event: MotionEvent ->
                     if (event.action == MotionEvent.ACTION_UP) {
                         val tx = event.x; val ty = event.y
-                        val tapped = latestQrs.minByOrNull { qr ->
+                        // Tap against both latest AND tracked QRs
+                        val allForTap = latestQrs.toList() + trackedQrs.values.toList()
+                        val tapped = allForTap.minByOrNull { qr ->
                             val r = qr.boundingBox
                             val cx = (r.left + r.right) / 2f; val cy = (r.top + r.bottom) / 2f
                             sqrt((tx - cx) * (tx - cx) + (ty - cy) * (ty - cy))
@@ -126,7 +149,18 @@ fun CameraPreview(
         )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            for ((qr, color) in overlayQrs) {
+            // Draw overlay QRs (from ScannerScreen state) + any tracked QRs not in overlayQrs
+            val overlayKeys = overlayQrs.map { it.first.rawValue }.toSet()
+            val combinedQrs = overlayQrs.toMutableList()
+
+            // Add persisted tracked QRs that aren't already in overlayQrs
+            for ((raw, qr) in trackedQrs) {
+                if (raw !in overlayKeys && qr.boundingBox.width() > 0) {
+                    combinedQrs.add(qr to OverlayColor.GREEN)
+                }
+            }
+
+            for ((qr, color) in combinedQrs) {
                 val box = qr.boundingBox; if (box.isEmpty) continue
                 val drawColor = when (color) {
                     OverlayColor.YELLOW -> Color.Yellow; OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
