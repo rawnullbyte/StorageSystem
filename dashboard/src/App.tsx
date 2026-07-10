@@ -33,6 +33,7 @@ export default function App() {
   const [editing, setEditing] = useState<{id: number, col: string} | null>(null);
   const [editVal, setEditVal] = useState("");
   const [sort, setSort] = useState<{col: string, desc: boolean}>({col: "scanned_at", desc: true});
+  const [selectedBag, setSelectedBag] = useState<Bag | null>(null);
   const [sidebarW, setSidebarW] = useState(260);
   const [filter, setFilter] = useState("");
   const resizing = useRef(false);
@@ -203,9 +204,11 @@ export default function App() {
                 </td></tr>
               )}
               {displayBags.map((b, i) => (
-                <tr key={b.bag_id} style={{ background: i % 2 === 0 ? "#0f1117" : "#13151d" }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "#1e293b"}
-                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? "#0f1117" : "#13151d"}>
+                <tr key={b.bag_id}
+                  onClick={() => setSelectedBag(selectedBag?.bag_id === b.bag_id ? null : b)}
+                  style={{ background: selectedBag?.bag_id === b.bag_id ? "#1e293b" : i % 2 === 0 ? "#0f1117" : "#13151d", cursor: "pointer" }}
+                  onMouseEnter={e => { if (selectedBag?.bag_id !== b.bag_id) (e.currentTarget as HTMLElement).style.background = "#1a1c28"; }}
+                  onMouseLeave={e => { if (selectedBag?.bag_id !== b.bag_id) (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? "#0f1117" : "#13151d"; }}>
                   <td style={{...tdS, color: "#555", fontFamily: "monospace", fontSize: 10 }}>{b.bag_id}</td>
                   <td style={{...tdS, fontFamily: "monospace", fontSize: 12 }}>
                     <a href={`https://www.lcsc.com/product-detail/${b.lcsc_part_number}.html`} target="_blank" rel="noopener" style={{ color: "#60a5fa", textDecoration: "none" }}>{b.lcsc_part_number}</a>
@@ -229,7 +232,28 @@ export default function App() {
           </table>
           <div style={{ padding: "4px 12px", color: "#555", fontSize: 11, borderTop: "1px solid #2a2d35", background: "#161822" }}>
             {displayBags.length} bag{displayBags.length !== 1 ? "s" : ""} {selectedContainer ? "in selected container" : ""}
+            {selectedBag && <span style={{ marginLeft: 16 }}>• selected: <strong style={{ color: "#94a3b8" }}>{selectedBag.lcsc_part_number}</strong></span>}
           </div>
+          {/* Detail panel */}
+          {selectedBag && (
+            <div style={{ height: 300, borderTop: "1px solid #2a2d35", background: "#0a0a0f", display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 12px", background: "#161822", borderBottom: "1px solid #2a2d35", fontSize: 12 }}>
+                <strong style={{ color: "#60a5fa" }}>{selectedBag.lcsc_part_number}</strong>
+                <span style={{ color: "#888" }}>—</span>
+                <span style={{ color: "#facc15", fontWeight: 700 }}>{selectedBag.current_quantity} pcs</span>
+                <span style={{ color: "#888" }}>—</span>
+                <span>{selectedBag.container_display_name} / {selectedBag.layer_name}</span>
+                <span style={{ color: "#555", fontSize: 11, marginLeft: "auto" }}>{selectedBag.manufacturer || ""} {selectedBag.package_type ? `(${selectedBag.package_type})` : ""}</span>
+                <button onClick={() => setSelectedBag(null)} style={{ cursor:"pointer", border:"none", background:"none", color:"#666", fontSize:14 }}>✕</button>
+              </div>
+              <iframe
+                src={`https://www.lcsc.com/product-detail/${selectedBag.lcsc_part_number}.html`}
+                style={{ flex: 1, border: "none", width: "100%", background: "#fff" }}
+                title={selectedBag.lcsc_part_number}
+                sandbox="allow-scripts allow-same-origin allow-forms"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
