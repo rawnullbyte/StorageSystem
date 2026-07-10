@@ -37,14 +37,56 @@ import com.storagesystem.data.repository.QrParseResult
 import kotlin.math.sqrt
 
 private const val TAG = "CameraPreview"
+private const val MAX_TRACKING_HISTORY = 8
+private const val MAX_PREDICTION_MS = 2000L
 
 /**
- * Google Lens-style QR tracking:
- * - Once a QR code is scanned, we lock onto it and persist its bounding box.
- * - When the QR becomes unreadable (camera moves away), the last known box stays.
- * - When the QR is re-detected, the position updates.
- * - This gives the smooth "tracking" feel even during blurry/moved frames.
+ * Velocity-based QR tracker:
+ * - Stores last N bounding boxes + timestamps for each QR
+ * - Computes velocity (dx, dy) from recent positions
+ * - When QR isn't detected, predicts position using velocity
+ * - This gives Lens-like persistent box that follows the QR even when blurry
  */
+private class QrPrediction(
+    val rawValue: String,
+    val qrType: QrType,
+    positions: MutableList<Pair<Rect, Long>> = mutableListOf()
+) {
+    val history: MutableList<Pair<Rect, Long>> = positions
+
+    fun addPosition(box: Rect, timeMs: Long) {
+        history.add(Pair(box, timeMs))
+        while (history.size > MAX_TRACKING_HISTORY) history.removeAt(0)
+    }
+
+    /** Predict current position based on velocity, or return latest if no history. */
+    fun predict(timeMs: Long): Rect? {
+        if (history.isEmpty()) return null
+        val latest = history.last().first
+        if (history.size < 2 || timeMs - history.last().second > MAX_PREDICTION_MS) return latest
+
+        // Compute velocity from last few frames
+        val recent = history.takeLast(3)
+        var dx = 0f; var dy = 0f; var count = 0
+        for (i in 1 until recent.size) {
+            val dt = (recent[i].second - recent[i - 1].second).toFloat()
+            if (dt > 0) {
+                dx += (recent[i].first.centerX() - recent[i - 1].first.centerX()) / dt
+                dy += (recent[i].first.centerY() - recent[i - 1].first.centerY()) / dt
+                count++
+            }
+        }
+        if (count == 0) return latest
+
+        val avgDx = dx / count; val avgDy = dy / count
+        val elapsed = timeMs - history.last().second
+        val predictedLeft = (latest.left + avgDx * elapsed).toInt()
+        val predictedTop = (latest.top + avgDy * elapsed).toInt()
+        val w = latest.width(); val h = latest.height()
+        return Rect(predictedLeft, predictedTop, predictedLeft + w, predictedTop + h)
+    }
+}
+
 @Composable
 fun CameraPreview(
     overlayQrs: List<Pair<DetectedQr, OverlayColor>>,
@@ -53,14 +95,14 @@ fun CameraPreview(
     modifier: Modifier = Modifier,
     torchOn: Boolean = false,
     onTorchChanged: ((Boolean) -> Unit)? = null,
-    trackingResetSignal: Int = 0  // increment to clear persisted QR tracking
+    trackingResetSignal: Int = 0
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val controllerRef = remember { mutableStateOf<LifecycleCameraController?>(null) }
 
-    // Persisted QR tracking — survives across frames even when QR isn't detected
-    val trackedQrs = remember { mutableStateMapOf<String, DetectedQr>() }
+    // Predictions keyed by QR raw value
+    val predictions = remember { mutableStateMapOf<String, QrPrediction>() }
     val latestQrs = remember { mutableStateListOf<DetectedQr>() }
 
     // Torch control
@@ -69,9 +111,9 @@ fun CameraPreview(
         try { ctrl.enableTorch(torchOn) } catch (_: Exception) {}
     }
 
-    // Clear tracked QRs when reset signal changes (mode switch, etc.)
+    // Reset tracking
     LaunchedEffect(trackingResetSignal) {
-        trackedQrs.clear()
+        predictions.clear()
         latestQrs.clear()
     }
 
@@ -106,6 +148,7 @@ fun CameraPreview(
                         CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED,
                         ContextCompat.getMainExecutor(ctx)
                     ) { result: MlKitAnalyzer.Result? ->
+                        val now = System.currentTimeMillis()
                         val barcodes: List<Barcode>? = result?.getValue(scanner) as? List<Barcode>
                         val detected = (barcodes ?: emptyList()).mapNotNull { barcode ->
                             val raw = barcode.rawValue ?: return@mapNotNull null
@@ -116,16 +159,28 @@ fun CameraPreview(
                             )
                         }
 
-                        // Google Lens-style: if we detect QRs, update tracked positions.
-                        // If nothing detected, the old tracked positions stay (persistent tracking).
-                        if (detected.isNotEmpty()) {
-                            for (qr in detected) {
-                                trackedQrs[qr.rawValue] = qr
+                        // Update prediction history with detected QRs
+                        val detectedKeys = mutableSetOf<String>()
+                        for (qr in detected) {
+                            detectedKeys.add(qr.rawValue)
+                            val pred = predictions.getOrPut(qr.rawValue) {
+                                QrPrediction(qr.rawValue, qr.qrType)
                             }
+                            pred.addPosition(qr.boundingBox, now)
                         }
-                        // Always keep the latest detection results for tap handling
+
+                        // Build overlay: detected QRs + predicted positions for undetected ones
+                        val overlayList = detected.toMutableList()
+                        for ((raw, pred) in predictions) {
+                            if (raw in detectedKeys) continue
+                            val predictedBox = pred.predict(now) ?: continue
+                            overlayList.add(
+                                DetectedQr(raw, predictedBox, pred.qrType)
+                            )
+                        }
+
                         latestQrs.clear()
-                        latestQrs.addAll(detected)
+                        latestQrs.addAll(overlayList)
                         onQrsDetected(detected)
                     }
                 )
@@ -133,9 +188,7 @@ fun CameraPreview(
                 pv.setOnTouchListener { _: View, event: MotionEvent ->
                     if (event.action == MotionEvent.ACTION_UP) {
                         val tx = event.x; val ty = event.y
-                        // Tap against both latest AND tracked QRs
-                        val allForTap = latestQrs.toList() + trackedQrs.values.toList()
-                        val tapped = allForTap.minByOrNull { qr ->
+                        val tapped = latestQrs.minByOrNull { qr ->
                             val r = qr.boundingBox
                             val cx = (r.left + r.right) / 2f; val cy = (r.top + r.bottom) / 2f
                             sqrt((tx - cx) * (tx - cx) + (ty - cy) * (ty - cy))
@@ -149,22 +202,30 @@ fun CameraPreview(
         )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            // Draw overlay QRs (from ScannerScreen state) + any tracked QRs not in overlayQrs
+            val now = System.currentTimeMillis()
             val overlayKeys = overlayQrs.map { it.first.rawValue }.toSet()
-            val combinedQrs = overlayQrs.toMutableList()
 
-            // Add persisted tracked QRs that aren't already in overlayQrs
-            for ((raw, qr) in trackedQrs) {
-                if (raw !in overlayKeys && qr.boundingBox.width() > 0) {
-                    combinedQrs.add(qr to OverlayColor.GREEN)
+            // Overlay QRs from state + predicted QRs
+            val combinedQrs = overlayQrs.toMutableList()
+            for ((raw, pred) in predictions) {
+                if (raw in overlayKeys) continue
+                val predictedBox = pred.predict(now) ?: continue
+                val qrType = pred.qrType
+                val color = when (qrType) {
+                    QrType.CONTAINER -> OverlayColor.GREEN
+                    QrType.LCSC_BAG -> OverlayColor.GREEN
+                    QrType.UNKNOWN -> OverlayColor.RED_NON_MATCH
                 }
+                combinedQrs.add(DetectedQr(raw, predictedBox, qrType) to color)
             }
 
             for ((qr, color) in combinedQrs) {
                 val box = qr.boundingBox; if (box.isEmpty) continue
                 val drawColor = when (color) {
-                    OverlayColor.YELLOW -> Color.Yellow; OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
-                    OverlayColor.BLUE -> Color.Blue; OverlayColor.RED_NON_MATCH -> Color.Red
+                    OverlayColor.YELLOW -> Color.Yellow
+                    OverlayColor.GREEN, OverlayColor.GREEN_MATCH -> Color.Green
+                    OverlayColor.BLUE -> Color.Blue
+                    OverlayColor.RED_NON_MATCH -> Color.Red
                 }
                 val sw = if (color == OverlayColor.GREEN_MATCH || color == OverlayColor.YELLOW) 6f else 3f
                 drawRect(drawColor, Offset(box.left.toFloat(), box.top.toFloat()),
@@ -190,8 +251,11 @@ private val qrLabelCache = mutableMapOf<String, String?>()
 private fun buildQuickLabel(qr: DetectedQr, color: OverlayColor): String? {
     if (color == OverlayColor.RED_NON_MATCH) return null
     return qrLabelCache.getOrPut(qr.rawValue) {
-        when (val p = parseQrRaw(qr.rawValue)) { is QrParseResult.Container -> "📦 ${p.cid.take(8)}…"
-            is QrParseResult.LcscBag -> "🔩 ${p.lcscPartNumber}"; is QrParseResult.Unknown -> null }
+        when (val p = parseQrRaw(qr.rawValue)) {
+            is QrParseResult.Container -> "📦 ${p.cid.take(8)}…"
+            is QrParseResult.LcscBag -> "🔩 ${p.lcscPartNumber}"
+            is QrParseResult.Unknown -> null
+        }
     }
 }
 private fun DrawScope.drawAimReticle(size: ComposeSize) {
@@ -207,7 +271,9 @@ private fun DrawScope.drawAimReticle(size: ComposeSize) {
 }
 private fun classifyQr(rawValue: String): QrType {
     val t = rawValue.trim()
-    return when { t.startsWith("{") && t.contains("\"cid\"") -> QrType.CONTAINER
+    return when {
+        t.startsWith("{") && t.contains("\"cid\"") -> QrType.CONTAINER
         t.startsWith("{") && (t.contains("=") || t.contains("pbn:") || t.contains(",pc:")) -> QrType.LCSC_BAG
-        else -> QrType.UNKNOWN }
+        else -> QrType.UNKNOWN
+    }
 }
