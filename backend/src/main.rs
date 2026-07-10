@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/component-tags/{bag_id}/{tag}", delete(handlers::remove_component_tag))
         .route("/api/orders", get(handlers::list_orders))
         .route("/api/search", post(handlers::search))
+        .route("/api/lcsc-proxy/*path", get(handlers::lcsc_proxy))
         .route("/ws", get(ws_handler))
         .with_state(state)
         .layer(CorsLayer::permissive())

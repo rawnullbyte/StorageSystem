@@ -1,5 +1,6 @@
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{Response, StatusCode};
 use axum::Json;
 use serde::Deserialize;
 
@@ -224,4 +225,38 @@ pub async fn list_orders(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<db::OrderSummary>>, (StatusCode, Json<serde_json::Value>)> {
     db::list_orders(&state.db).await.map(Json).map_err(internal_error)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LCSC Proxy (bypass X-Frame-Options for iframe embedding)
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proxies any LCSC page, stripping headers that block iframe embedding.
+/// Use as iframe src: /api/lcsc-proxy/product-detail/C111836.html
+/// Everything after /api/lcsc-proxy/ is forwarded to lcsc.com/
+pub async fn lcsc_proxy(Path(path): Path<String>) -> Result<Response<Body>, (StatusCode, Json<serde_json::Value>)> {
+    let url = format!("https://www.lcsc.com/{}", path.trim_start_matches('/'));
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(false)
+        .build()
+        .map_err(|e| internal_error(&e))?;
+
+    let resp = client.get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| internal_error(&e))?;
+
+    let status = resp.status();
+    let body_bytes = resp.bytes().await.map_err(|e| internal_error(&e))?;
+
+    let response = Response::builder()
+        .status(status)
+        .header("Content-Type", "text/html; charset=utf-8")
+        // Allow embedding in iframe (strip X-Frame-Options that LCSC sends)
+        .header("X-Frame-Options", "ALLOWALL")
+        .body(Body::from(body_bytes.to_vec()))
+        .map_err(|e| internal_error(&e))?;
+
+    Ok(response)
 }
